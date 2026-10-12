@@ -67,6 +67,14 @@ h1 span { display: block; color: #f3f0e5; letter-spacing: 3px; margin-top: 6px; 
 .greeting { font-size: 18px; font-weight: 650; line-height: 1.5; }
 .greeting > span { margin-left: 4px; font-size: 17px; }
 .username { margin-top: 3px; color: #a4a99b; font-size: 12px; }
+.auth-loading { color: #c7cbbc; font-size: 14px; line-height: 1.6; }
+.account-connected { margin-top: 10px; color: #b0c786; font-size: 12px; }
+.auth-error { color: #edc9ad; font-size: 13px; line-height: 1.6; }
+.retry-button { margin-top: 12px; min-height: 44px; padding: 10px 22px; border: 1px solid #876542; border-radius: 8px; background: #332719; color: #ffd096; cursor: pointer; }
+.player-progress { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 22px; }
+.player-progress > div { padding: 12px; border: 1px solid #3c4336; border-radius: 10px; background: #20261e; }
+.player-progress dt { color: #a4ac9a; font-size: 11px; }
+.player-progress dd { margin: 5px 0 0; color: #ffc077; font-size: 21px; font-weight: 750; }
 .development-badge { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid #3d4437; border-radius: 5px; color: #b5bda6; background: #20261e; font: 10px/1.2 monospace; }
 .development-badge > span { width: 5px; height: 5px; border-radius: 50%; background: #b0c786; }
 .telegram-badge { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 9px; padding: 6px 10px; border: 1px solid #3d4437; border-color: color-mix(in srgb, var(--telegram-accent, #ffa64d) 35%, #242922); border-radius: 5px; color: #c8d5cf; color: color-mix(in srgb, var(--telegram-accent, #ffa64d) 40%, #f2f0e7); background: #20261e; font-size: 11px; }

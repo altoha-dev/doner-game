@@ -56,8 +56,8 @@ export function getTelegramStartParam(): string {
 
 export function getDisplayUser(webApp: TelegramWebApp | undefined): TelegramDisplayUser | undefined {
   // SECURITY: initDataUnsafe нельзя использовать как доказательство личности пользователя.
-  // Здесь данные нужны только для отображения. На следующем этапе backend-сервер
-  // будет проверять подпись сырой строки WebApp.initData перед авторизацией.
+  // Допустимо лишь предварительное отображение. Backend проверяет подпись сырой
+  // строки WebApp.initData; после входа источник identity — серверный GET /me.
   const user = webApp?.initDataUnsafe?.user;
   if (!user || typeof user.first_name !== 'string' || !user.first_name.trim()) return undefined;
 
