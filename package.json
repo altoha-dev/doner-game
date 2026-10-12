@@ -1,0 +1,22 @@
+{
+  "name": "doner-game",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": ">=24.11.0 <25",
+    "pnpm": ">=10.34.6 <11"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' run dev",
+    "dev:web": "pnpm --filter @doner-game/web dev",
+    "dev:bot": "pnpm --filter @doner-game/bot dev",
+    "build": "pnpm -r build",
+    "build:web": "pnpm --filter @doner-game/web build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present test"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}
