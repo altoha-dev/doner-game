@@ -1,8 +1,10 @@
 # DONER GAME
 
-Telegram Bot + Telegram Mini App + API. **Этап 3, v0.3 Account Prototype:** сервер проверяет Telegram initData, сохраняет игрока и прогресс в PostgreSQL, выдаёт JWT на один час. Frontend получает профиль через `/me` и показывает «Аккаунт подключён ✓», Doners и Golden Doners.
+Telegram Bot + Telegram Mini App + API. **Этап 4, v0.4 Campaign Prototype:** сервер проверяет Telegram initData, сохраняет игрока и прогресс в PostgreSQL, выдаёт JWT на один час. Frontend получает профиль через `/me` и показывает «Аккаунт подключён ✓», Doners и Golden Doners.
 
-Кнопки «СЮЖЕТ» и «ИГРАТЬ С ДРУЗЬЯМИ» пока показывают «Скоро». Campaign, уровни, выбор/покупка персонажей, Lobby, Party, ghosts и WebSocket относятся к будущим этапам. При регистрации персонажи не открываются.
+«СЮЖЕТ» открывает Campaign и выбор персонажей. Altoha выдаётся бесплатно; Aigerim и Temik открываются независимо за 1 Doner. Party и запуск уровней пока «Скоро». Платформер, награды, способности, Lobby и multiplayer не реализованы.
+
+Все новые экраны DONER GAME должны следовать **Hi-Bit Lo-Fi Pixel Art**: [единая art direction](docs/ART_DIRECTION.md), tokens — `apps/web/src/tokens.css`.
 
 ## Структура
 
@@ -28,15 +30,20 @@ apps/
     .env.example
   web/
     src/
-      App.tsx                  # экран аккаунта, заглушки режимов
+      App.tsx                  # Home / Campaign / Character Select, навигация
       api.ts                   # HTTP client, access token только в памяти
       usePlayerAuth.ts         # loading / authenticated / error / browser
       telegram.ts              # SDK lifecycle, theme, launch params
+      CharacterSelect.tsx      # открытие и выбор персонажа
+      CampaignScreen.tsx       # карта-заглушка, 3 уровня
+      PlayerPanel.tsx          # аккаунт + компактный HUD
+      PixelArt.tsx             # оригинальные prototype portraits/icons
       DonerMark.tsx
+      tokens.css               # центральные дизайн-токены
       styles.css
     test/                      # Telegram helpers и HTTP client
     .env.example
-packages/shared/               # GameMode и DTO; только типы, без Prisma
+packages/shared/               # общий runtime character catalog и DTO, без Prisma
 ```
 
 ## Требования и установка
@@ -114,12 +121,12 @@ pnpm dev:bot
 | Модель | Поля и связи |
 | --- | --- |
 | `User` | UUID `id`; unique BigInt `telegramId`; `firstName`; nullable `username`, `lastName`, `photoUrl`, `languageCode`; `createdAt`, `updatedAt`, `lastLoginAt` |
-| `PlayerProgress` | UUID `id`; unique `userId` → User; `doners`, `goldenDoners`, `campaignStage` по умолчанию 0; timestamps |
+| `PlayerProgress` | UUID `id`; unique `userId` → User; `doners`, `goldenDoners`, `campaignStage` по умолчанию 0; nullable `selectedCharacterId`; timestamps |
 | `UnlockedCharacter` | UUID `id`; `userId` → User; строковый `characterId`; `unlockedAt`; unique `(userId, characterId)` |
 
-У игрока один `PlayerProgress` и произвольное число `UnlockedCharacter`. Foreign keys используют cascade при удалении User. Пустой список персонажей допустим. Таблиц персонажей/кампании пока нет; строковый `characterId` оставляет возможность добавить каталог позже. В API `telegramId` всегда строка, BigInt в JSON не сериализуется напрямую.
+У игрока один `PlayerProgress` и произвольное число `UnlockedCharacter`. Foreign keys используют cascade при удалении User. На уровне БД пустой список допустим; API гарантирует starter при входе и загрузке профиля. Таблиц персонажей/кампании пока нет; строковый `characterId` оставляет возможность добавить каталог позже. В API `telegramId` всегда строка, BigInt в JSON не сериализуется напрямую.
 
-Первый login транзакционно создаёт User и прогресс. Следующие обновляют Telegram profile и `lastLoginAt`, сохраняя валюту, campaignStage и персонажей. Отсутствующая строка прогресса восстанавливается. Unique constraints и upsert защищают от дубликатов при одновременных входах.
+Первый login транзакционно создаёт User и прогресс. Следующие обновляют Telegram profile и `lastLoginAt`, сохраняя валюту, campaignStage и персонажей. Отсутствующая строка прогресса восстанавливается. API идемпотентно добавляет starter и задаёт его как selected только при пустом выборе. Unique constraints и upsert защищают от дубликатов при одновременных входах.
 
 ```bash
 pnpm db:generate                       # Prisma Client без соединения с БД
@@ -135,15 +142,17 @@ pnpm db:migrate --name describe_change # создать миграцию при 
 | --- | --- | --- |
 | `GET /health` | публичный | `{ "status": "ok" }`, liveness; не раскрывает конфигурацию |
 | `POST /auth/telegram` | публичный, 10 запросов/мин/IP | тело `{ "initData": "оригинальная строка WebApp.initData" }`; `{ accessToken, expiresIn: 3600, user, progress }` |
+| `POST /characters/:characterId/unlock` | Bearer JWT, без request body | `{ result: "unlocked" или "already_unlocked", progress }` |
+| `PUT /me/character` | Bearer JWT, `{ "characterId": "altoha" }` | `{ progress }` |
 | `GET /me` | `Authorization: Bearer <accessToken>` | `{ user, progress }` пользователя из JWT `sub` |
 
-`user`: `id`, `telegramId` (строка), `firstName`, nullable `lastName`, `username`, `photoUrl`, `languageCode`. `progress`: `doners`, `goldenDoners`, `campaignStage`, `unlockedCharacterIds`.
+`user`: `id`, `telegramId` (строка), `firstName`, nullable `lastName`, `username`, `photoUrl`, `languageCode`. `progress`: `doners`, `goldenDoners`, `campaignStage`, `unlockedCharacterIds`, nullable `selectedCharacterId`.
 
 Проверка использует [официальный алгоритм Telegram HMAC](https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app): из decoded полей удаляется `hash`, остальные сортируются и объединяются через `\n`; secret key — HMAC-SHA256 от BOT_TOKEN с ключом `WebAppData`. Сравнение hash выполняется за постоянное время. Если Telegram прислал поле `signature`, оно участвует в этом HMAC; отдельный Ed25519 flow здесь не используется. Только после проверки подписи и `auth_date` разбирается JSON user. Дубликаты полей, повреждённые данные и небезопасные числовые IDs отклоняются. Допустимое отклонение времени вперёд — 30 секунд.
 
 JWT HS256 содержит внутренний UUID в `sub`, `iat`, `exp`, issuer и audience. Срок — час, refresh tokens отсутствуют. `/me` проверяет подпись/срок/issuer/audience и существование User; переданные клиентом `userId`/`telegramId` не определяют пользователя.
 
-Единый формат ошибок: `{ "error": { "code": "INVALID_TELEGRAM_AUTH", "message": "..." } }`. Статусы: 400 — неверное тело, 401 — Telegram auth/JWT, 404 — неизвестный endpoint, 413 — слишком большое тело, 429 — лимит входов, 500 — внутренняя ошибка без stack trace. HTTP body limit — 32 KiB, initData — до 16 KiB. Включены Helmet, CORS и `Cache-Control: no-store`. CORS ограничивает браузерный доступ и не заменяет авторизацию.
+Единый формат ошибок: `{ "error": { "code": "INVALID_TELEGRAM_AUTH", "message": "..." } }`. Статусы: 400 — неверное тело, 401 — Telegram auth/JWT, 403 — locked character, 409 — недостаточно Doners, 404 — неизвестный endpoint, 413 — слишком большое тело, 429 — лимит входов, 500 — внутренняя ошибка без stack trace. HTTP body limit — 32 KiB, initData — до 16 KiB. Включены Helmet, CORS и `Cache-Control: no-store`. CORS ограничивает браузерный доступ и не заменяет авторизацию.
 
 Rate limit хранится в памяти одного процесса, без Redis. Для этого этапа используйте одну API replica. `TRUST_PROXY_HOPS=0` игнорирует поддельный `X-Forwarded-For` при прямом локальном доступе; `1` предназначен для Railway public HTTP proxy. Не увеличивайте число доверенных proxy без проверки своей схемы размещения.
 
@@ -155,14 +164,14 @@ Rate limit хранится в памяти одного процесса, бе�
 
 Состояния: «Подключаем аккаунт...», подключённый профиль, понятная ошибка с кнопкой «Повторить», Development Mode без auth. Неудачный запрос прерывается по таймауту 12 секунд; размонтирование/повтор отменяет старые запросы. Debug-блок есть только в dev-сборке, без tokens и initData.
 
-Сохранены тема Telegram, safe areas, мобильные ширины 320–500 px, кнопки-заглушки и `Launch: ...`. `getTelegramStartParam()` читает первое допустимое значение: `initDataUnsafe.start_param`, сырой `initData`, query, hash; fallback `home`. Это параметр отображения, не авторизация. Разрешены 1–512 символов `A–Z a–z 0–9 _ -`.
+Сохранены тема Telegram, safe areas, мобильные ширины 320–500 px и `Launch: ...`. Кнопка «СЮЖЕТ» открывает Campaign, «ИГРАТЬ С ДРУЗЬЯМИ» — панель «Скоро». `getTelegramStartParam()` читает первое допустимое значение: `initDataUnsafe.start_param`, сырой `initData`, query, hash; fallback `home`. Это параметр отображения, не авторизация. Разрешены 1–512 символов `A–Z a–z 0–9 _ -`.
 
 Существующий Main Mini App в BotFather продолжает указывать на **HTTPS frontend URL Vercel**. Бот использует обычные URL-кнопки, работающие в личных и групповых чатах:
 
 - `/start`, `/game` → `https://t.me/<BOT_USERNAME>?startapp=home`.
 - `/help` → список команд.
 - В группе при нескольких ботах: `/game@<BOT_USERNAME>`; бот должен иметь право отправлять сообщения. Отключать privacy mode для команд не требуется.
-- `getMiniAppDeepLink('solo' | 'party' | 'lobby_test123')` сохраняет соответствующий startapp; настоящие режимы пока не открываются.
+- `getMiniAppDeepLink('solo' | 'party' | 'lobby_test123')` сохраняет соответствующий startapp; параметры пока только отображаются; Campaign открывается кнопкой меню.
 
 [Telegram: Main Mini App и startapp](https://core.telegram.org/bots/webapps#launching-the-main-mini-app).
 
@@ -174,7 +183,7 @@ pnpm test
 pnpm build
 ```
 
-Проверяются все workspace-пакеты. Unit tests используют синтетические ключи: 15 bot/deep-link, 17 frontend/Telegram/HTTP, 16 API/config/auth. Они не требуют реального bot token или БД. Ещё один API integration test включается через `TEST_DATABASE_URL`; без неё явно пропускается.
+Проверяются все workspace-пакеты. Unit tests используют синтетические ключи: 15 bot/deep-link, 21 frontend/Telegram/HTTP/Campaign, 18 API/config/auth/catalog/routes. Они не требуют реального bot token или БД. Два API integration-набора (в том числе 11 сценариев character economy) включаются через `TEST_DATABASE_URL`; без неё явно пропускаются.
 
 Чтобы проверить настоящую PostgreSQL, создайте **отдельную пустую тестовую** базу с именем, заканчивающимся на `_test`, затем:
 
@@ -193,7 +202,7 @@ pnpm --filter @doner-game/web preview
 pnpm --filter @doner-game/bot start
 ```
 
-`build:web` не читает API/bot `.env`; shared содержит только type imports. API build генерирует Prisma Client, но не применяет миграции. Vite preview предназначен для локальной проверки, не для production hosting.
+`build:web` не читает API/bot `.env`. Shared теперь содержит runtime catalog; `build:web` и `build:api` сначала собирают shared через pnpm workspace dependency graph. Root dev/test scripts также готовят shared; при изменении catalog в запущенном dev выполните `pnpm --filter @doner-game/shared build`. API build генерирует Prisma Client, но не применяет миграции. Vite preview предназначен для локальной проверки, не для production hosting.
 
 ## Этап 3 — Backend на Railway
 
@@ -256,7 +265,7 @@ curl -i https://YOUR-API.up.railway.app/health
 1. В **Settings → Environment Variables** добавьте `VITE_API_URL=https://YOUR-API.up.railway.app` для **Production** (и Preview, если нужен). Это URL API без `/health` и `/auth/telegram`.
 2. Сохраните `ENABLE_EXPERIMENTAL_COREPACK=1` для выбора закреплённого pnpm. **BOT_TOKEN, JWT_SECRET, DATABASE_URL в Vercel не добавляйте.**
 3. Выполните **Redeploy**: изменение variable без сборки не меняет уже опубликованный JavaScript.
-4. Откройте постоянный публичный production URL в обычном браузере: должен появиться Development Mode, версия `v0.3 Account Prototype`, без debug-блока. Frontend должен открываться без Vercel Authentication.
+4. Откройте постоянный публичный production URL в обычном браузере: должен появиться Development Mode, версия `v0.4 Campaign Prototype`, без debug-блока. Frontend должен открываться без Vercel Authentication.
 5. В Railway `CORS_ORIGINS` должен совпадать именно с этим frontend origin. В BotFather Main Mini App URL остаётся URL frontend; API URL туда не вставляйте.
 
 [Настройка Vite в Vercel](https://vercel.com/docs/frameworks/frontend/vite), [сборка и Corepack](https://vercel.com/docs/builds/configure-a-build).
@@ -265,9 +274,46 @@ curl -i https://YOUR-API.up.railway.app/health
 
 1. Откройте Mini App заново через `/start`, `/game` или `https://t.me/<BOT_USERNAME>?startapp=home` **в Telegram**. Должно появиться «Подключаем аккаунт...», затем ваше имя, username (если есть), «Аккаунт подключён ✓», Doners: 0 и Golden Doners: 0 для нового аккаунта.
 2. Если доступен WebView inspector, проверьте последовательность `POST /auth/telegram` 200 → `GET /me` 200. Не копируйте initData или JWT в screenshots/issues. Надпись «Открыто в Telegram» сама по себе не доказывает успешную авторизацию.
-3. В Railway выберите **PostgreSQL → Database / Data** и таблицу `User`: найдите ваш `telegramId`, проверьте `firstName`, `lastLoginAt`. В `PlayerProgress` должна быть одна строка с тем же внутренним `userId`, валютами и campaignStage 0. `UnlockedCharacter` остаётся пустой. Имена вкладок зависят от Dashboard; также можно открыть SQL client через подключение PostgreSQL из Railway.
+3. В Railway выберите **PostgreSQL → Database / Data** и таблицу `User`: найдите ваш `telegramId`, проверьте `firstName`, `lastLoginAt`. В `PlayerProgress` должна быть одна строка с тем же внутренним `userId`, валютами и campaignStage 0. `UnlockedCharacter` содержит `altoha`, а `PlayerProgress.selectedCharacterId` — `altoha` при первом выборе. Имена вкладок зависят от Dashboard; также можно открыть SQL client через подключение PostgreSQL из Railway.
 4. Закройте и откройте Mini App снова: внутренний `User.id` остаётся прежним, `lastLoginAt` обновляется; лишние User/PlayerProgress не появляются. Существующий прогресс сохраняется (автоматическая integration-проверка покрывает ненулевые значения).
-5. Проверьте `startapp=solo`, `party`, `lobby_test123`, а также `/game@<BOT_USERNAME>` в группе: Launch меняется, кнопки по-прежнему показывают «Скоро».
+5. Проверьте `startapp=solo`, `party`, `lobby_test123`, а также `/game@<BOT_USERNAME>` в группе: Launch меняется, «СЮЖЕТ» открывает Campaign, а Party и запуск уровня остаются «Скоро».
 6. Если API недоступен, остаётся экран с «Не удалось подключиться к серверу» и «Повторить». При 401 Telegram проверьте совпадение BOT_TOKEN, свежесть запуска и время сервера; не отключайте проверку подписи. При 429 подождите минуту. При CORS error сверяйте точный frontend origin.
 
 Настоящий вход через ваш bot и облачная база требуют ваших secrets и ручного deployment. Локальные тесты используют отдельную PostgreSQL и синтетические подписанные данные; это не замена финальной проверке в Telegram.
+
+## Stage 4 — Campaign & Characters
+
+Весь Mini App использует Hi-Bit Lo-Fi design system: тёмный фон, оранжевый DONER, cream text, ступенчатые рамки, жёсткие pixel shadows, компактный HUD, лёгкий dithering и scanlines. Home, Campaign, Character Select, loading/error/retry и Party placeholder оформлены единообразно. Правила для следующих этапов — [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md). Персонажи и эмблема — оригинальные SVG на пиксельной сетке, без внешних art/font CDN.
+
+Каталог — **`packages/shared/src/characters.ts`**, одинаковый для API и frontend:
+
+| ID | Имя | Starter | Цена |
+| --- | --- | --- | --- |
+| `altoha` | Altoha | да | 0 |
+| `aigerim` | Aigerim | нет | 1 Doner |
+| `temik` | Temik | нет | 1 Doner |
+
+Стоимость, порядок, имя, описание и starter-флаг задаются в каталоге. Здесь нет способностей. Aigerim и Temik можно открыть в любом порядке. При смене starter в будущем каталог должен сохранять хотя бы одного starter; прежние разблокировки не удаляются.
+
+**Existing users / backfill.** После успешного `/auth/telegram` и при загрузке через `/me` API в транзакции обеспечивает запись starter через `createMany(skipDuplicates)`. Если selection пуст, устанавливается starter из catalog. Уже выбранный персонаж, валюты, campaignStage и все прежние unlocks сохраняются. Таким образом, пользователь Stage 3 с пустыми unlocks получит Altoha при первом обращении к обновлённому API, в том числе со старым действующим JWT. Массовый SQL backfill и отдельный ручной script не нужны; до первого обращения неактивные строки могут оставаться с NULL.
+
+**Открытие.** `POST /characters/:characterId/unlock` использует только current user из JWT. Request body не принимается: клиент не передаёт цену, баланс или userId. Неизвестный character — 400 `INVALID_CHARACTER`, недостаточно средств — 409 `INSUFFICIENT_DONERS`. Повторное открытие, включая starter, возвращает 200 `already_unlocked` без списания.
+
+API блокирует строку User через параметризованный `SELECT ... FOR UPDATE`, проверяет ownership, условно уменьшает Doners (`doners >= catalog.unlockCost`) и создаёт unlock в **одной Prisma transaction**. Все изменения персонажей используют одинаковый порядок блокировок. Конкурирующие операции одного игрока выполняются последовательно даже в разных API process; unique constraint `(userId, characterId)` остаётся дополнительной защитой. Ошибка после списания откатывает и баланс, и unlock. Проверены одинаковые покупки и конкуренция разных персонажей за последний Doner. [PostgreSQL row locks](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS), [Prisma transactions](https://www.prisma.io/docs/orm/fundamentals/transactions).
+
+**Выбор.** `PUT /me/character` принимает только `{ "characterId": "altoha" }`. Locked character → 403 `CHARACTER_LOCKED`. Выбор сохраняется в `PlayerProgress.selectedCharacterId` и возвращается в `/me`. Unlock не переключает персонажа автоматически. Frontend обновляет progress исключительно ответом сервера; во время операции кнопки блокируются. При потерянном ответе профиль перечитывается; повторный unlock безопасен. JWT по-прежнему только в памяти.
+
+**Campaign.** Home → Campaign → Character Select управляются небольшим state (`campaign.ts`), без React Router. Есть видимый Back и Telegram BackButton. При `campaignStage=0` уровень 1 доступен, 2/3 закрыты. Сохранённое значение используется для отображения: предыдущие узлы отмечаются пройденными, следующий доступным. Самих уровней и endpoint изменения campaignStage нет. Запуск отключён («СКОРО»); награды Doner/Golden Doner не начисляются. Новый игрок с нулевым балансом пока может выбирать только Altoha. Production endpoints выдачи валюты отсутствуют.
+
+**Портреты.** Внешность всех трёх персонажей временная, с меткой «ПРОТОТИП». Точка замены на будущие локальные PNG/WebP — `CharacterPortrait` в `apps/web/src/PixelArt.tsx`. Карточки и HUD менять не нужно. Игровые sprite sheets подключаются на следующих этапах; текущие placeholders не определяют финальную внешность/способности.
+
+**Production migration и deployment:**
+
+1. Отправьте изменения в существующий Git repository. Новая миграция: `apps/api/prisma/migrations/20261013000000_selected_character/migration.sql`. Она только добавляет nullable TEXT `PlayerProgress.selectedCharacterId`, без удаления данных и сброса валюты.
+2. На Railway сначала redeploy **API** с существующим pre-deploy **`pnpm db:deploy`**. Должна примениться `20261013000000_selected_character`; начальную миграцию не изменяйте. Root Directory и архитектура остаются прежними. Сохраните Build `pnpm install --frozen-lockfile --prod=false && pnpm build:api`, Start `pnpm start:api`, Healthcheck `/health`.
+3. **Environment variables менять не нужно.** Существующие DATABASE_URL/BOT_TOKEN/JWT_SECRET остаются только на backend; `VITE_API_URL` остаётся прежним. Shared теперь имеет runtime JS, поэтому используйте обновлённые root build scripts, которые собирают его перед API/web.
+4. После успешного API deploy проверьте `/health`, затем в **Vercel** выполните redeploy новой версии с прежним `pnpm build:web` и `apps/web/dist`. Порядок API → frontend предотвращает запросы к отсутствующим новым endpoint.
+5. Заново откройте Mini App. Версия — `v0.4 Campaign Prototype`. У существующего аккаунта должен появиться Altoha, выбор сохранится. В PostgreSQL проверьте одну строку `UnlockedCharacter(altoha)`, поле `selectedCharacterId` и прежний баланс. Повторный вход не должен добавлять дубликаты.
+6. Проверьте Home → Campaign → Character Select → Back, locked Aigerim/Temik по 1 Doner, disabled запуск уровня и Party «Скоро». Покупки с достаточным балансом, double unlock и rollback проверяются на отдельной тестовой PostgreSQL; начислять деньги через production API невозможно.
+
+Для автоматической проверки экономики: `TEST_DATABASE_URL=... pnpm test` после миграции отдельной базы с суффиксом `_test`. Набор включает starter новых/существующих игроков, идемпотентность, locked selection, оба независимых unlock, сохранение выбора, недостаточный баланс, конкуренцию через два подключения, rollback после ошибки вставки и реальные HTTP responses. Ни один тест не подключается к production автоматически.

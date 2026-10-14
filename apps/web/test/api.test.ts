@@ -63,3 +63,26 @@ test('missing or unsafe API URLs fail locally', () => {
     assert.throws(() => createApiClient(url), ApiClientError);
   }
 });
+
+test('unlock and selection send no balance/user ID, return committed progress and retain session after business errors', async (t) => {
+  const calls: { url: string; options: RequestInit }[] = [];
+  let enough = false;
+  const progress = { doners: 0, goldenDoners: 0, campaignStage: 0, unlockedCharacterIds: ['altoha', 'aigerim'], selectedCharacterId: 'aigerim' };
+  t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    calls.push({ url, options });
+    if (url.endsWith('/auth/telegram')) return Response.json({ accessToken: 'test-token' });
+    if (url.endsWith('/unlock') && !enough) return Response.json({ error: { code: 'INSUFFICIENT_DONERS' } }, { status: 409 });
+    return Response.json({ progress, result: 'unlocked' });
+  });
+  const client = createApiClient('https://api.example.com');
+  await client.login('original');
+  await assert.rejects(client.unlockCharacter('aigerim'), error => error instanceof ApiClientError && error.code === 'INSUFFICIENT_DONERS');
+  enough = true;
+  assert.deepEqual((await client.unlockCharacter('aigerim')).progress, progress);
+  assert.deepEqual((await client.selectCharacter('aigerim')).progress, progress);
+  for (const call of calls.slice(1)) assert.equal((call.options.headers as Record<string, string>).Authorization, 'Bearer test-token');
+  assert.equal(calls[2]!.options.method, 'POST');
+  assert.equal(calls[2]!.options.body, undefined);
+  assert.equal(calls[3]!.options.method, 'PUT');
+  assert.deepEqual(JSON.parse(String(calls[3]!.options.body)), { characterId: 'aigerim' });
+});

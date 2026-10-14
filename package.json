@@ -8,19 +8,19 @@
     "pnpm": ">=10.34.6 <11"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter './apps/*' run dev",
-    "dev:web": "pnpm --filter @doner-game/web dev",
+    "dev": "pnpm --filter @doner-game/shared build && pnpm --parallel --filter './apps/*' run dev",
+    "dev:web": "pnpm --filter @doner-game/shared build && pnpm --filter @doner-game/web dev",
     "dev:bot": "pnpm --filter @doner-game/bot dev",
-    "dev:api": "pnpm --filter @doner-game/api dev",
+    "dev:api": "pnpm --filter @doner-game/shared build && pnpm --filter @doner-game/api dev",
     "build": "pnpm -r build",
-    "build:web": "pnpm --filter @doner-game/web build",
-    "build:api": "pnpm --filter @doner-game/api build",
+    "build:web": "pnpm --filter @doner-game/web... build",
+    "build:api": "pnpm --filter @doner-game/api... build",
     "start:api": "pnpm --filter @doner-game/api start",
     "db:generate": "pnpm --filter @doner-game/api db:generate",
     "db:migrate": "pnpm --filter @doner-game/api db:migrate",
     "db:deploy": "pnpm --filter @doner-game/api db:deploy",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r --if-present test"
+    "test": "pnpm --filter @doner-game/shared build && pnpm -r --if-present test"
   },
   "devDependencies": {
     "typescript": "^7.0.2"

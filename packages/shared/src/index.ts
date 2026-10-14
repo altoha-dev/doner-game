@@ -1,4 +1,6 @@
 export type GameMode = 'home' | 'solo' | 'party';
+export { CHARACTERS, STARTER_CHARACTER, getCharacter } from './characters.js';
+export type { CharacterId, CharacterDefinition } from './characters.js';
 
 export interface PlayerDto {
   id: string;
@@ -15,6 +17,12 @@ export interface PlayerProgressDto {
   goldenDoners: number;
   campaignStage: number;
   unlockedCharacterIds: string[];
+  selectedCharacterId: string | null;
+}
+
+export interface UnlockCharacterResponseDto {
+  progress: PlayerProgressDto;
+  result: 'unlocked' | 'already_unlocked';
 }
 
 export interface PlayerProfileDto {

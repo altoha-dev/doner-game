@@ -1,4 +1,4 @@
-import type { ApiErrorDto, AuthResponseDto, PlayerProfileDto } from '@doner-game/shared';
+import type { ApiErrorDto, AuthResponseDto, CharacterId, PlayerProfileDto, PlayerProgressDto, UnlockCharacterResponseDto } from '@doner-game/shared';
 
 export class ApiClientError extends Error {
   readonly code: string;
@@ -20,6 +20,15 @@ export function getAuthErrorMessage(error: unknown): string {
     if (error.status === 429) return 'Слишком много попыток входа. Подождите минуту и повторите.';
   }
   return 'Не удалось подключиться к серверу.';
+}
+
+export function getCharacterErrorMessage(error: unknown): string {
+  if (error instanceof ApiClientError) {
+    if (error.code === 'INSUFFICIENT_DONERS') return 'Не хватает Doners. Персонаж не открыт.';
+    if (error.code === 'CHARACTER_LOCKED') return 'Сначала откройте этого персонажа.';
+    if (error.code === 'INVALID_CHARACTER') return 'Персонаж недоступен. Обновите Mini App.';
+  }
+  return 'Не удалось подтвердить действие. Повторите попытку: повторное открытие не спишет Doner дважды.';
 }
 
 export function createApiClient(apiUrl: string | undefined) {
@@ -62,6 +71,17 @@ export function createApiClient(apiUrl: string | undefined) {
     }
   }
 
+  async function authorized<T>(path: string, options: RequestInit, signal?: AbortSignal): Promise<T> {
+    if (!accessToken) throw new ApiClientError('INVALID_ACCESS_TOKEN', 401);
+    try {
+      return await request<T>(path, { ...options, headers: { ...options.headers, Authorization: `Bearer ${accessToken}` } }, signal);
+    } catch (error) {
+      // Business errors and temporary outages must not discard a valid session.
+      if (error instanceof ApiClientError && error.status === 401) accessToken = null;
+      throw error;
+    }
+  }
+
   return {
     async login(initData: string, signal?: AbortSignal): Promise<void> {
       accessToken = null;
@@ -74,15 +94,13 @@ export function createApiClient(apiUrl: string | undefined) {
       if (!signal?.aborted) accessToken = result.accessToken;
     },
     async getMe(signal?: AbortSignal): Promise<PlayerProfileDto> {
-      if (!accessToken) throw new ApiClientError('INVALID_ACCESS_TOKEN', 401);
-      try {
-        return await request<PlayerProfileDto>('/me', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }, signal);
-      } catch (error) {
-        accessToken = null;
-        throw error;
-      }
+      return authorized<PlayerProfileDto>('/me', {}, signal);
+    },
+    async unlockCharacter(characterId: CharacterId, signal?: AbortSignal): Promise<UnlockCharacterResponseDto> {
+      return authorized<UnlockCharacterResponseDto>(`/characters/${encodeURIComponent(characterId)}/unlock`, { method: 'POST' }, signal);
+    },
+    async selectCharacter(characterId: CharacterId, signal?: AbortSignal): Promise<{ progress: PlayerProgressDto }> {
+      return authorized('/me/character', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ characterId }) }, signal);
     },
     clear(): void { accessToken = null; },
   };

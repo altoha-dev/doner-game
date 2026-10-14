@@ -45,7 +45,7 @@ export async function buildApp(config: ApiConfig, players: PlayerStore, logging 
   await app.register(helmet);
   await app.register(cors, {
     origin: config.corsOrigins,
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: false,
     maxAge: 600,
@@ -75,6 +75,22 @@ export async function buildApp(config: ApiConfig, players: PlayerStore, logging 
     return { ...profile, accessToken: app.jwt.sign({ sub: profile.user.id }), expiresIn: 3600 };
   });
   app.get('/me', { preHandler: authenticate }, async (request) => request.playerProfile);
+
+  app.post<{ Params: { characterId: string } }>('/characters/:characterId/unlock', {
+    preHandler: authenticate,
+    schema: { params: { type: 'object', required: ['characterId'], properties: { characterId: { type: 'string', maxLength: 64 } } } },
+  }, async request => {
+    if (request.body !== undefined) throw new ApiError(400, 'INVALID_REQUEST', 'Unlock does not accept a request body.');
+    return players.unlockCharacter(request.playerProfile!.user.id, request.params.characterId);
+  });
+
+  app.put<{ Body: { characterId: string } }>('/me/character', {
+    preHandler: authenticate,
+    schema: { body: {
+      type: 'object', required: ['characterId'], additionalProperties: false,
+      properties: { characterId: { type: 'string', minLength: 1, maxLength: 64 } },
+    } },
+  }, async request => ({ progress: await players.selectCharacter(request.playerProfile!.user.id, request.body.characterId) }));
 
   return app;
 }

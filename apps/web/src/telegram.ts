@@ -4,6 +4,7 @@ interface TelegramDisplayUser {
 }
 
 interface TelegramWebApp {
+  BackButton?: { show(): void; hide(): void; onClick(callback: () => void): void; offClick(callback: () => void): void };
   initData: string;
   initDataUnsafe: { user?: TelegramDisplayUser; start_param?: string };
   themeParams?: { accent_text_color?: string; button_color?: string };

@@ -29,7 +29,7 @@ export const profile: PlayerProfileDto = {
     id: 'b64a723a-4598-40c4-9503-68821a265ebc', telegramId: '4503599627370495',
     firstName: 'Altoha', username: 'altoha', lastName: null, photoUrl: null, languageCode: null,
   },
-  progress: { doners: 0, goldenDoners: 0, campaignStage: 0, unlockedCharacterIds: [] },
+  progress: { doners: 0, goldenDoners: 0, campaignStage: 0, unlockedCharacterIds: ['altoha'], selectedCharacterId: 'altoha' },
 };
 
 export function memoryPlayers(): PlayerStore {
@@ -37,6 +37,8 @@ export function memoryPlayers(): PlayerStore {
     async login(identity) {
       return { ...profile, user: { id: profile.user.id, ...identity, telegramId: identity.telegramId.toString() } };
     },
+    async unlockCharacter() { throw new Error('Unexpected mock unlock'); },
+    async selectCharacter() { throw new Error('Unexpected mock selection'); },
     async findById(id) { return id === profile.user.id ? profile : null; },
   };
 }

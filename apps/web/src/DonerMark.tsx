@@ -1,24 +1,21 @@
 export function DonerMark() {
-  return (
-    <div className="doner-art" aria-hidden="true">
-      <span className="art-spark art-spark--one">+</span>
-      <span className="art-spark art-spark--two">+</span>
-      <svg viewBox="0 0 120 140" className="doner-mark" fill="none">
-        <path d="M30 38 42 22h39l16 16-3 25-13 17-8 41H46L35 78 23 59Z" fill="#272b23" />
-        <path d="M29 41 43 27h32l16 13-5 27H34Z" fill="#f8c979" />
-        <path d="m33 40 12-7h27l13 9-4 8H36Z" fill="#c37b39" />
-        <path d="m29 48 13-7 13 6 12-8 20 9-2 14H32Z" fill="#88a85a" />
-        <path d="m32 56 12-5 10 6 14-7 17 6-4 14H38Z" fill="#cf623c" />
-        <path d="m37 56 7 3 12-4 8 7 12-4 7 4-5 11H40Z" fill="#f8e5b5" />
-        <path d="m27 61 24 11 35-9-13 56H47Z" fill="#f2b760" />
-        <path d="m27 61 24 11 13 47H47Z" fill="#ffd890" />
-        <path d="m51 72 35-9-13 56H62Z" fill="#d79246" />
-        <path d="m36 85 23 8 20-9-6 35H47Z" fill="#eee9d9" />
-        <path d="m59 93 20-9-6 35H64Z" fill="#c4c6b3" />
-        <path d="m49 99 11 4 7-3-3 10-11-2Z" fill="#e36f38" />
-        <path d="m42 32 7-1m9 0h4m9 3 3 2" stroke="#ffe5ad" strokeWidth="3" />
-      </svg>
-      <span className="art-caption">+1 К ПРИКЛЮЧЕНИЯМ</span>
-    </div>
-  );
+  return <div className="doner-scene" aria-hidden="true">
+    <span className="scene-star scene-star--one" /><span className="scene-star scene-star--two" /><span className="scene-star scene-star--three" />
+    <svg className="doner-mark" viewBox="0 0 64 64" shapeRendering="crispEdges">
+      <path fill="#0c100e" d="M17 8h29v4h5v5h5v17h-5v10h-5v10h-5v7H27v-7h-5V44h-5V34h-5V17h5z" />
+      <path fill="#926036" d="M17 8h25v4h7v5h4v12h-5v10h-5v10h-5v10h-8V49h-5V39h-5V29h-5V17h2z" />
+      <path fill="#f5bd6b" d="M18 9h24v4h6v7H15v-6h3z" />
+      <path fill="#ffdc93" d="M21 9h17v3H21zM15 16h32v4H15z" />
+      <path fill="#546a43" d="M13 21h6v-3h10v3h9v-3h9v3h6v7h-8v3H31v-3H20v3h-7z" />
+      <path fill="#a2b66d" d="M16 20h6v3h11v3H19v-2h-3zm24 1h10v3H40z" />
+      <path fill="#ad5436" d="M15 28h11v-3h11v3h13v6H38v3H25v-3H15z" />
+      <path fill="#e08b50" d="M17 28h9v3h-9zm20 3h11v3H37z" />
+      <path fill="#f2d6a0" d="M18 34h6v3h12v-3h12v5h-5v10h-5v10h-8V49h-5V39h-7z" />
+      <path fill="#fff0c1" d="M18 34h6v3h12v-3h9v5H33v6h-6v-6h-9z" />
+      <path fill="#d3a66d" d="M38 40h6v9h-6v10h-6V48h6z" />
+      <path fill="#e49a4e" d="M27 42h6v3h-6zm3 9h5v3h-5z" />
+      <path fill="#bc854b" d="M34 7h2v2h-2zM25 12h2v2h-2zm16 3h2v2h-2zM21 17h2v2h-2z" />
+    </svg>
+    <span className="scene-caption">+1 К ПРИКЛЮЧЕНИЯМ</span>
+  </div>;
 }

@@ -1,115 +1,58 @@
-import { useEffect, useState } from 'react';
-import type { GameMode } from '@doner-game/shared';
+import { useEffect, useRef, useState } from 'react';
 import { DonerMark } from './DonerMark';
-import {
-  getTelegramStartParam,
-  getTelegramWebApp,
-  initializeTelegram,
-  isTelegramLaunch,
-} from './telegram';
+import { getTelegramStartParam, getTelegramWebApp, initializeTelegram, isTelegramLaunch } from './telegram';
 import { usePlayerAuth } from './usePlayerAuth';
+import { PlayerPanel } from './PlayerPanel';
+import { PixelIcon } from './PixelArt';
+import { CampaignScreen } from './CampaignScreen';
+import { CharacterSelect } from './CharacterSelect';
+import type { Screen } from './campaign';
 
 export function App() {
   const [webApp] = useState(getTelegramWebApp);
   const [startParam] = useState(getTelegramStartParam);
-  const [mode, setMode] = useState<GameMode>('home');
+  const [screen, setScreen] = useState<Screen>('home');
+  const [partyOpen, setPartyOpen] = useState(false);
+  const title = useRef<HTMLHeadingElement>(null);
   const inTelegram = isTelegramLaunch(webApp);
+  useEffect(() => initializeTelegram(webApp), [webApp]);
+  const auth = usePlayerAuth(webApp?.initData);
+  const profile = auth.state.status === 'authenticated' ? auth.state.profile : undefined;
+  const back = () => setScreen(screen === 'characters' ? 'campaign' : 'home');
 
   useEffect(() => {
-    return initializeTelegram(webApp);
-  }, [webApp]);
+    window.scrollTo(0, 0);
+    title.current?.focus({ preventScroll: true });
+    if (!webApp?.BackButton) return;
+    const button = webApp.BackButton;
+    const goBack = () => setScreen(screen === 'characters' ? 'campaign' : 'home');
+    if (screen === 'home') button.hide();
+    else { button.show(); button.onClick(goBack); }
+    return () => { button.offClick(goBack); button.hide(); };
+  }, [screen, webApp]);
 
-  const { state: auth, retry } = usePlayerAuth(webApp?.initData);
-  const user = auth.status === 'authenticated' ? auth.profile.user : undefined;
+  return <div className="app-shell">
+    <header className="top-bar"><span className="brand-tag"><span className="brand-dot" />DONER UNIVERSE</span><span className="edition">EST. 2026</span></header>
+    <main className={`screen screen--${screen}`} key={screen}>
+      {screen === 'home' ? <section className="hero" aria-labelledby="game-title">
+        <DonerMark />
+        <h1 id="game-title" ref={title} tabIndex={-1}>DONER <span>GAME</span></h1>
+        <p className="hero-caption">Большое приключение.<br />С двойной порцией соуса.</p>
+      </section> : <div className="screen-heading"><button className="back-button" onClick={back}><PixelIcon name="back" />НАЗАД</button><p className="eyebrow">SOLO CAMPAIGN / {screen === 'campaign' ? '01' : '02'}</p><h1 ref={title} tabIndex={-1}>{screen === 'campaign' ? 'СЮЖЕТ' : <>ВЫБОР<br />ПЕРСОНАЖА</>}</h1></div>}
 
-  return (
-    <div className="app-shell">
-      <header className="top-bar">
-        <span className="brand-tag"><span className="brand-dot" />DONER UNIVERSE</span>
-        <span className="edition">EST. 2026</span>
-      </header>
+      <PlayerPanel auth={auth.state} retry={auth.retry} inTelegram={inTelegram} />
 
-      <main className="home">
-        <section className="hero" aria-labelledby="game-title">
-          <DonerMark />
-          <h1 id="game-title">DONER <span>GAME</span></h1>
-          <p className="hero-caption">Большое приключение.<br />С двойной порцией соуса.</p>
-        </section>
+      {screen === 'home' ? <section className="menu" aria-label="Главное меню">
+        <div className="section-label"><span className="eyebrow">ВЫБЕРИ ПРИКЛЮЧЕНИЕ</span><span aria-hidden="true">01 — 02</span></div>
+        <button className="menu-button menu-button--story" onClick={() => setScreen('campaign')}><span className="menu-icon"><PixelIcon name="flag" /></span><span className="menu-copy"><span className="menu-title">СЮЖЕТ</span><span className="menu-caption">Твоя собственная история</span></span><PixelIcon name="arrow" /></button>
+        <button className="menu-button menu-button--party" onClick={() => setPartyOpen(value => !value)} aria-expanded={partyOpen} aria-controls="party-preview"><span className="menu-icon"><PixelIcon name="party" /></span><span className="menu-copy"><span className="menu-title">ИГРАТЬ С ДРУЗЬЯМИ</span><span className="menu-caption">Вместе веселее · скоро</span></span><PixelIcon name="arrow" /></button>
+        {partyOpen && <aside className="party-preview pixel-panel" id="party-preview"><span className="eyebrow">PARTY MODE</span><h2>СКОРО</h2><p>Здесь можно будет играть вместе.</p><button className="text-button" onClick={() => setPartyOpen(false)}>ПОНЯТНО</button></aside>}
+        <p className="menu-note"><PixelIcon name="sparkle" />Каждое приключение начинается с донера.</p>
+      </section> : screen === 'campaign' ? <CampaignScreen profile={profile} onCharacters={() => setScreen('characters')} /> : <CharacterSelect progress={profile?.progress} pending={auth.pendingCharacter} error={auth.actionError} notice={auth.notice} onAction={auth.changeCharacter} />}
 
-        <section className="menu" aria-label="Главное меню">
-          <div className="player-greeting">
-            {inTelegram ? (
-              <>
-                <p className="telegram-badge"><span />Открыто в Telegram</p>
-                {auth.status === 'loading' && <p className="auth-loading" role="status">Подключаем аккаунт...</p>}
-                {user && (
-                  <>
-                    <p className="greeting">Привет, {user.firstName} <span aria-hidden="true">✌️</span></p>
-                    {user.username && <p className="username">@{user.username}</p>}
-                    <p className="account-connected">Аккаунт подключён ✓</p>
-                  </>
-                )}
-                {auth.status === 'error' && (
-                  <div className="auth-error">
-                    <p role="alert">{auth.message}</p>
-                    <button className="retry-button" type="button" onClick={retry}>Повторить</button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="development-badge"><span />Development Mode</p>
-            )}
-          </div>
-
-          {auth.status === 'authenticated' && (
-            <dl className="player-progress" aria-label="Прогресс игрока">
-              <div><dt>Doners</dt><dd>{auth.profile.progress.doners}</dd></div>
-              <div><dt>Golden Doners</dt><dd>{auth.profile.progress.goldenDoners}</dd></div>
-            </dl>
-          )}
-
-          <p className="menu-label">ВЫБЕРИ СВОЁ ПРИКЛЮЧЕНИЕ</p>
-
-          <button
-            className="mode-button mode-button--solo"
-            type="button"
-            aria-describedby="mode-status"
-            onClick={() => setMode('solo')}
-          >
-            <span className="mode-icon" aria-hidden="true">🎮</span>
-            <span className="mode-copy"><span className="mode-title">СЮЖЕТ</span><span className="mode-caption">Твоя собственная история</span></span>
-            <span className="mode-arrow" aria-hidden="true">↗</span>
-          </button>
-
-          <button
-            className="mode-button mode-button--party"
-            type="button"
-            aria-describedby="mode-status"
-            onClick={() => setMode('party')}
-          >
-            <span className="mode-icon" aria-hidden="true">👥</span>
-            <span className="mode-copy"><span className="mode-title">ИГРАТЬ С ДРУЗЬЯМИ</span><span className="mode-caption">Вместе веселее</span></span>
-            <span className="mode-arrow" aria-hidden="true">↗</span>
-          </button>
-
-          <p id="mode-status" className="mode-status" role="status" aria-live="polite" aria-atomic="true">
-            {mode === 'home' ? 'Каждое приключение начинается с донера.' : `${mode === 'solo' ? 'Сюжет' : 'Игра с друзьями'} — скоро!`}
-          </p>
-
-          {inTelegram && <p className="launch-param">Launch: {startParam}</p>}
-
-          {import.meta.env.DEV && (
-            <aside className="debug-panel" aria-label="Диагностика запуска">
-              <span>Telegram: {inTelegram ? 'yes' : 'no'}</span>
-              <span>User: {user ? 'yes' : 'no'}</span>
-              <span>Account: {auth.status}</span>
-              <span>start_param: {startParam}</span>
-            </aside>
-          )}
-        </section>
-      </main>
-
-      <footer className="footer"><span className="footer-line" /><span>v0.3 Account Prototype</span><span className="footer-line" /></footer>
-    </div>
-  );
+      {inTelegram && <p className="launch-param">Launch: {startParam}</p>}
+      {import.meta.env.DEV && <aside className="debug-panel" aria-label="Диагностика запуска"><span>Telegram: {inTelegram ? 'yes' : 'no'}</span><span>User: {profile ? 'yes' : 'no'}</span><span>Account: {auth.state.status}</span><span>start_param: {startParam}</span></aside>}
+    </main>
+    <footer className="footer"><span />v0.4 Campaign Prototype<span /></footer>
+  </div>;
 }

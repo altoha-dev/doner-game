@@ -1,10 +1,14 @@
-import type { PlayerProfileDto } from '@doner-game/shared';
+import { CHARACTERS, STARTER_CHARACTER, getCharacter } from '@doner-game/shared';
+import type { PlayerProfileDto, PlayerProgressDto, UnlockCharacterResponseDto } from '@doner-game/shared';
 import type { Prisma, PrismaClient } from './generated/prisma/client.js';
 import type { VerifiedTelegramUser } from './telegram-auth.js';
+import { ApiError } from './errors.js';
 
 export interface PlayerStore {
   login(user: VerifiedTelegramUser): Promise<PlayerProfileDto>;
   findById(id: string): Promise<PlayerProfileDto | null>;
+  unlockCharacter(id: string, characterId: string): Promise<UnlockCharacterResponseDto>;
+  selectCharacter(id: string, characterId: string): Promise<PlayerProgressDto>;
 }
 
 const relations = {
@@ -29,8 +33,40 @@ function toProfile(user: Prisma.UserGetPayload<{ include: typeof relations }>): 
       goldenDoners: user.progress.goldenDoners,
       campaignStage: user.progress.campaignStage,
       unlockedCharacterIds: user.unlockedCharacters.map(character => character.characterId),
+      selectedCharacterId: user.progress.selectedCharacterId,
     },
   };
+}
+
+async function ensureStarter(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  await tx.playerProgress.upsert({ where: { userId }, create: { userId }, update: {} });
+  await tx.unlockedCharacter.createMany({
+    data: CHARACTERS.filter(character => character.starter).map(character => ({ userId, characterId: character.id })),
+    skipDuplicates: true,
+  });
+  // Never overwrite a player's existing selection or reset their progress.
+  await tx.playerProgress.updateMany({
+    where: { userId, selectedCharacterId: null },
+    data: { selectedCharacterId: STARTER_CHARACTER.id },
+  });
+}
+
+async function lockPlayer(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
+  // All character writes and backfill lock the same row first. Concurrent
+  // requests (even across API processes) observe the previous committed result.
+  // Parameterized SQL: the ID is never interpolated into SQL text.
+  const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "User" WHERE "id" = ${id}::uuid FOR UPDATE`;
+  return rows.length > 0;
+}
+
+async function readProfile(tx: Prisma.TransactionClient, id: string): Promise<PlayerProfileDto> {
+  return toProfile(await tx.user.findUniqueOrThrow({ where: { id }, include: relations }));
+}
+
+function requireCharacter(id: string) {
+  const character = getCharacter(id);
+  if (!character) throw new ApiError(400, 'INVALID_CHARACTER', 'Unknown character.');
+  return character;
 }
 
 export function createPlayerStore(db: PrismaClient): PlayerStore {
@@ -45,18 +81,44 @@ export function createPlayerStore(db: PrismaClient): PlayerStore {
           create: profile,
           update: profile,
         });
-        await tx.playerProgress.upsert({
-          where: { userId: user.id },
-          create: { userId: user.id },
-          update: {}, // Never reset progress on login; also repair a missing row.
-        });
-        // No characters are unlocked or removed by authentication.
-        return toProfile(await tx.user.findUniqueOrThrow({ where: { id: user.id }, include: relations }));
+        // The upsert already holds a lock on this User until commit.
+        await ensureStarter(tx, user.id);
+        return readProfile(tx, user.id);
       });
     },
     async findById(id) {
-      const user = await db.user.findUnique({ where: { id }, include: relations });
-      return user ? toProfile(user) : null;
+      return db.$transaction(async tx => {
+        if (!await lockPlayer(tx, id)) return null;
+        await ensureStarter(tx, id);
+        return readProfile(tx, id);
+      });
+    },
+    async unlockCharacter(id, characterId) {
+      const character = requireCharacter(characterId);
+      return db.$transaction(async tx => {
+        if (!await lockPlayer(tx, id)) throw new ApiError(401, 'INVALID_ACCESS_TOKEN', 'Player no longer exists.');
+        await ensureStarter(tx, id);
+        const owned = await tx.unlockedCharacter.findUnique({ where: { userId_characterId: { userId: id, characterId } } });
+        if (owned) return { result: 'already_unlocked', progress: (await readProfile(tx, id)).progress };
+        const charged = await tx.playerProgress.updateMany({
+          where: { userId: id, doners: { gte: character.unlockCost } },
+          data: { doners: { decrement: character.unlockCost } },
+        });
+        if (charged.count !== 1) throw new ApiError(409, 'INSUFFICIENT_DONERS', 'Not enough Doners.');
+        await tx.unlockedCharacter.create({ data: { userId: id, characterId } });
+        return { result: 'unlocked', progress: (await readProfile(tx, id)).progress };
+      });
+    },
+    async selectCharacter(id, characterId) {
+      requireCharacter(characterId);
+      return db.$transaction(async tx => {
+        if (!await lockPlayer(tx, id)) throw new ApiError(401, 'INVALID_ACCESS_TOKEN', 'Player no longer exists.');
+        await ensureStarter(tx, id);
+        const owned = await tx.unlockedCharacter.findUnique({ where: { userId_characterId: { userId: id, characterId } } });
+        if (!owned) throw new ApiError(403, 'CHARACTER_LOCKED', 'Unlock this character first.');
+        await tx.playerProgress.update({ where: { userId: id }, data: { selectedCharacterId: characterId } });
+        return (await readProfile(tx, id)).progress;
+      });
     },
   };
 }

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import type { PlayerProfileDto } from '@doner-game/shared';
-import { createApiClient, getAuthErrorMessage } from './api';
+import { useEffect, useRef, useState } from 'react';
+import type { CharacterId, PlayerProfileDto } from '@doner-game/shared';
+import { ApiClientError, createApiClient, getAuthErrorMessage, getCharacterErrorMessage } from './api';
 
-type AuthState =
+export type AuthState =
   | { status: 'browser' }
   | { status: 'loading' }
   | { status: 'authenticated'; profile: PlayerProfileDto }
@@ -11,6 +11,11 @@ type AuthState =
 export function usePlayerAuth(initData: string | undefined) {
   const [state, setState] = useState<AuthState>({ status: initData ? 'loading' : 'browser' });
   const [attempt, setAttempt] = useState(0);
+  const session = useRef<{ api: ReturnType<typeof createApiClient>; controller: AbortController } | null>(null);
+  const actionLock = useRef(false);
+  const [pendingCharacter, setPendingCharacter] = useState<CharacterId | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ characterId: CharacterId; kind: 'unlock' | 'select' } | null>(null);
 
   useEffect(() => {
     if (!initData) {
@@ -20,6 +25,10 @@ export function usePlayerAuth(initData: string | undefined) {
     const controller = new AbortController();
     let api: ReturnType<typeof createApiClient> | undefined;
     setState({ status: 'loading' });
+    setActionError(null);
+    setPendingCharacter(null);
+    setNotice(null);
+    actionLock.current = false;
 
     async function connect(): Promise<void> {
       try {
@@ -27,7 +36,10 @@ export function usePlayerAuth(initData: string | undefined) {
         await api.login(initData!, controller.signal);
         // Only the authenticated /me response becomes the UI identity source.
         const profile = await api.getMe(controller.signal);
-        if (!controller.signal.aborted) setState({ status: 'authenticated', profile });
+        if (!controller.signal.aborted) {
+          session.current = { api, controller };
+          setState({ status: 'authenticated', profile });
+        }
       } catch (error) {
         api?.clear();
         if (!controller.signal.aborted) setState({ status: 'error', message: getAuthErrorMessage(error) });
@@ -38,8 +50,53 @@ export function usePlayerAuth(initData: string | undefined) {
     return () => {
       controller.abort();
       api?.clear();
+      session.current = null;
     };
   }, [initData, attempt]);
 
-  return { state, retry: () => setAttempt(value => value + 1) };
+  async function changeCharacter(kind: 'unlock' | 'select', characterId: CharacterId): Promise<void> {
+    const current = session.current;
+    if (!current || actionLock.current) return;
+    actionLock.current = true;
+    setPendingCharacter(characterId);
+    setActionError(null);
+    setNotice(null);
+    const update = (profile: PlayerProfileDto) => {
+      if (!current.controller.signal.aborted) setState({ status: 'authenticated', profile });
+    };
+    try {
+      const result = kind === 'unlock'
+        ? await current.api.unlockCharacter(characterId, current.controller.signal)
+        : await current.api.selectCharacter(characterId, current.controller.signal);
+      if (!current.controller.signal.aborted) {
+        // No optimistic debit or ownership: only the committed server response.
+        setState(previous => previous.status === 'authenticated' ? { ...previous, profile: { ...previous.profile, progress: result.progress } } : previous);
+        setNotice({ characterId, kind });
+      }
+    } catch (error) {
+      if (current.controller.signal.aborted) return;
+      if (error instanceof ApiClientError && error.status === 401) {
+        current.api.clear();
+        session.current = null;
+        setState({ status: 'error', message: getAuthErrorMessage(error) });
+      } else {
+        setActionError(getCharacterErrorMessage(error));
+        // Reconcile an uncertain response or stale balance from another window.
+        try { update(await current.api.getMe(current.controller.signal)); }
+        catch (refreshError) {
+          if (!current.controller.signal.aborted && refreshError instanceof ApiClientError && refreshError.status === 401) {
+            session.current = null;
+            setState({ status: 'error', message: getAuthErrorMessage(refreshError) });
+          }
+        }
+      }
+    } finally {
+      if (!current.controller.signal.aborted) {
+        actionLock.current = false;
+        setPendingCharacter(null);
+      }
+    }
+  }
+
+  return { state, retry: () => setAttempt(value => value + 1), changeCharacter, pendingCharacter, actionError, notice };
 }

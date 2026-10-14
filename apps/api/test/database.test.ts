@@ -23,7 +23,7 @@ test('PostgreSQL: persistent login, constraints, progress preservation and concu
 
   const first = await store.login(identity);
   assert.equal(first.user.telegramId, telegramId.toString());
-  assert.deepEqual(first.progress, { doners: 0, goldenDoners: 0, campaignStage: 0, unlockedCharacterIds: [] });
+  assert.deepEqual(first.progress, { doners: 0, goldenDoners: 0, campaignStage: 0, unlockedCharacterIds: ['altoha'], selectedCharacterId: 'altoha' });
   await db.playerProgress.update({ where: { userId: first.user.id }, data: { doners: 42, goldenDoners: 3, campaignStage: 2 } });
   await db.unlockedCharacter.create({ data: { userId: first.user.id, characterId: 'integration-test-character' } });
   await db.user.update({ where: { id: first.user.id }, data: { lastLoginAt: new Date('2020-01-01') } });
@@ -38,7 +38,7 @@ test('PostgreSQL: persistent login, constraints, progress preservation and concu
   assert.equal(body.user.username, 'updated');
   assert.equal(body.user.languageCode, 'ru');
   assert.equal(body.user.photoUrl, 'https://example.com/photo');
-  assert.deepEqual(body.progress, { doners: 42, goldenDoners: 3, campaignStage: 2, unlockedCharacterIds: ['integration-test-character'] });
+  assert.deepEqual(body.progress, { doners: 42, goldenDoners: 3, campaignStage: 2, unlockedCharacterIds: ['altoha', 'integration-test-character'], selectedCharacterId: 'altoha' });
   const row = await db.user.findUniqueOrThrow({ where: { id: first.user.id } });
   assert.ok(row.lastLoginAt.getTime() > Date.now() - 60000);
   const me = await app.inject({ url: '/me', headers: { authorization: `Bearer ${body.accessToken}` } });
@@ -60,6 +60,6 @@ test('PostgreSQL: persistent login, constraints, progress preservation and concu
   await db.playerProgress.delete({ where: { userId: first.user.id } });
   const repaired = await store.login(identity);
   assert.equal(repaired.progress.doners, 0);
-  assert.deepEqual(repaired.progress.unlockedCharacterIds, ['integration-test-character']);
+  assert.deepEqual(repaired.progress.unlockedCharacterIds, ['altoha', 'integration-test-character']);
   assert.equal(repaired.user.username, null);
 });
