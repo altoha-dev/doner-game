@@ -2,6 +2,7 @@ import { CHARACTERS } from '@doner-game/shared';
 import type { CharacterId, PlayerProgressDto } from '@doner-game/shared';
 import { getCharacterState } from './campaign';
 import { CharacterPortrait, PixelIcon } from './PixelArt';
+import { getPlayerLaunch } from './game/launch';
 
 type Props = {
   progress: PlayerProgressDto | undefined;
@@ -9,8 +10,10 @@ type Props = {
   error: string | null;
   notice: { characterId: CharacterId; kind: 'unlock' | 'select' } | null;
   onAction: (kind: 'unlock' | 'select', characterId: CharacterId) => Promise<void>;
+  onPlay: () => void;
 };
-export function CharacterSelect({ progress, pending, error, notice, onAction }: Props) {
+export function CharacterSelect({ progress, pending, error, notice, onAction, onPlay }: Props) {
+  const launch = getPlayerLaunch(progress);
   return <section className="character-select" aria-label="Каталог персонажей">
     <p className="screen-description">Твоя история. Твой персонаж.<br /><span>Открывай в любом порядке.</span></p>
     {!progress && <p className="preview-note">Каталог доступен для просмотра. Выбор и открытие сохраняются после входа через Telegram.</p>}
@@ -36,6 +39,7 @@ export function CharacterSelect({ progress, pending, error, notice, onAction }: 
         </article>;
       })}
     </div>
+    <button className="pixel-button character-play" disabled={!launch || pending !== null} onClick={onPlay}><PixelIcon name="flag" />ИГРАТЬ · УРОВЕНЬ 1{launch && ` · ${launch.character.displayName}`}</button>
     <p className="catalog-note"><PixelIcon name="sparkle" />Внешность персонажей пока временная.<br />Финальные спрайты появятся позже.</p>
   </section>;
 }

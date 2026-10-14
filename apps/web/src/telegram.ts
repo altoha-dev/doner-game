@@ -13,6 +13,9 @@ interface TelegramWebApp {
   isVersionAtLeast(version: string): boolean;
   setHeaderColor(color: string): void;
   setBackgroundColor(color: string): void;
+  isVerticalSwipesEnabled?: boolean;
+  disableVerticalSwipes?(): void;
+  enableVerticalSwipes?(): void;
   onEvent(event: 'themeChanged', callback: () => void): void;
   offEvent(event: 'themeChanged', callback: () => void): void;
 }
@@ -25,6 +28,13 @@ declare global {
 
 export function getTelegramWebApp(): TelegramWebApp | undefined {
   return typeof window === 'undefined' ? undefined : window.Telegram?.WebApp;
+}
+
+export function suspendTelegramGameSwipes(webApp: TelegramWebApp | undefined): (() => void) | undefined {
+  if (!webApp?.initData || !webApp.isVersionAtLeast('7.7') || !webApp.disableVerticalSwipes || !webApp.enableVerticalSwipes) return;
+  const wasEnabled = webApp.isVerticalSwipesEnabled !== false;
+  webApp.disableVerticalSwipes();
+  return () => { if (wasEnabled) webApp.enableVerticalSwipes?.(); };
 }
 
 export function isTelegramLaunch(webApp: TelegramWebApp | undefined): boolean {

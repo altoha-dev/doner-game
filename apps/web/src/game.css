@@ -1,0 +1,41 @@
+.app-shell--game { --space-5: 12px; padding-bottom: calc(12px + max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px)) + var(--tg-content-safe-area-inset-bottom, 0px)); }
+.app-shell--game .top-bar { padding-bottom: 8px; }
+.app-shell--game .footer { margin-top: 12px; }
+.screen--game { animation: none; }
+.game-screen { padding-top: 4px; }
+.game-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.game-toolbar h1 { font: 700 var(--text-sm) var(--font-mono); color: var(--text-muted); }
+.game-pause { min-height: 44px; padding: 4px; border: 0; background: none; color: var(--text-primary); font: 700 var(--text-xs) var(--font-mono); }
+.game-pause:disabled { color: var(--text-muted); }
+.game-loadout { display: flex; align-items: center; gap: 8px; padding: 6px 0 10px; }
+.game-loadout .character-portrait { width: 32px; height: 32px; }
+.game-loadout > div { display: grid; gap: 2px; }
+.game-loadout b { font-size: var(--text-md); }
+.game-loadout div > span { font: var(--text-xs) var(--font-mono); color: var(--world-accent); }
+.game-prototype { margin-left: auto; max-width: 70px; color: var(--text-muted); text-align: right; font: var(--text-xs)/1.5 var(--font-mono); }
+.game-viewport {
+  position: relative; border: var(--pixel-border); box-shadow: var(--pixel-shadow); background: var(--bg-0);
+  height: clamp(200px, calc(100svh - 284px - max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) - var(--tg-content-safe-area-inset-top, 0px) - max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px)) - var(--tg-content-safe-area-inset-bottom, 0px)), 520px);
+}
+.phaser-host { position: absolute; inset: 0; overflow: clip; touch-action: none; }
+.phaser-host canvas { display: block; image-rendering: pixelated; }
+.game-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 16px; padding: 24px; background: #121412e8; text-align: center; }
+.game-overlay > b { font: 800 var(--text-lg) var(--font-mono); color: var(--accent); }
+.game-overlay p { color: var(--text-muted); font-size: var(--text-md); }
+.game-controls { display: flex; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.game-controls > div { display: flex; gap: 8px; }
+.game-control { width: 60px; min-height: 56px; display: grid; place-content: center; gap: 2px; border: 2px solid var(--line); background: #2d372cb8; color: var(--text-primary); box-shadow: 0 3px 0 var(--shadow-color); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.game-control > span { font: 700 20px/1 var(--font-mono); }
+.game-control small { font: var(--text-xs) var(--font-mono); }
+.game-control--jump { width: 76px; border-color: var(--accent-dark); background: #aa622c66; }
+.game-control:active:not(:disabled) { background: var(--panel-light); border-color: var(--accent); transform: translateY(2px); box-shadow: none; }
+.game-control:disabled { opacity: .45; }
+.game-hint { margin-top: 12px; color: var(--text-primary); font-size: var(--text-sm); line-height: 1.5; }
+.game-keyboard-hint, .game-footnote { margin-top: 4px; color: var(--text-muted); font: var(--text-xs)/1.5 var(--font-mono); }
+.game-footnote { font-family: var(--font-body); }
+.local-preview { padding: 16px; display: grid; gap: 12px; }
+.local-preview p { color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
+.local-preview-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.local-preview-buttons button { flex: 1 1 76px; }
+.character-play { margin-top: 20px; }
+@media (pointer: coarse) { .game-keyboard-hint { display: none; } }

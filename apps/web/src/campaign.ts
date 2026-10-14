@@ -1,6 +1,10 @@
 import type { CharacterDefinition, PlayerProgressDto } from '@doner-game/shared';
 
-export type Screen = 'home' | 'campaign' | 'characters';
+export type Screen = 'home' | 'campaign' | 'characters' | 'game';
+export type GameOrigin = 'campaign' | 'characters';
+export function getBackScreen(screen: Screen, gameOrigin: GameOrigin): Screen {
+  return screen === 'game' ? gameOrigin : screen === 'characters' ? 'campaign' : 'home';
+}
 export const CAMPAIGN_LEVELS = [1, 2, 3] as const;
 export function getLevelState(level: number, campaignStage: number): 'completed' | 'available' | 'locked' {
   if (level <= campaignStage) return 'completed';

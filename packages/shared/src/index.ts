@@ -1,6 +1,8 @@
 export type GameMode = 'home' | 'solo' | 'party';
 export { CHARACTERS, STARTER_CHARACTER, getCharacter } from './characters.js';
 export type { CharacterId, CharacterDefinition } from './characters.js';
+export { WORLD_THEMES, getWorldTheme } from './worldThemes.js';
+export type { WorldTheme } from './worldThemes.js';
 
 export interface PlayerDto {
   id: string;

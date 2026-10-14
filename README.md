@@ -1,8 +1,8 @@
 # DONER GAME
 
-Telegram Bot + Telegram Mini App + API. **Этап 4, v0.4 Campaign Prototype:** сервер проверяет Telegram initData, сохраняет игрока и прогресс в PostgreSQL, выдаёт JWT на один час. Frontend получает профиль через `/me` и показывает «Аккаунт подключён ✓», Doners и Golden Doners.
+Telegram Bot + Telegram Mini App + API. **Этап 5, v0.5 Playable Prototype:** первый игровой уровень на Phaser с движением, прыжком, платформами и тремя мирами. Сервер проверяет Telegram initData, сохраняет игрока и прогресс в PostgreSQL, выдаёт JWT на один час. Frontend получает профиль через `/me` и показывает «Аккаунт подключён ✓», Doners и Golden Doners.
 
-«СЮЖЕТ» открывает Campaign и выбор персонажей. Altoha выдаётся бесплатно; Aigerim и Temik открываются независимо за 1 Doner. Party и запуск уровней пока «Скоро». Платформер, награды, способности, Lobby и multiplayer не реализованы.
+«СЮЖЕТ» открывает Campaign → Character Select → игру. Altoha выдаётся бесплатно; Aigerim и Temik открываются независимо за 1 Doner. Выбранный открытый персонаж определяет оформление уровня 1. Party и уровни 2/3 пока «Скоро». Награды, сохранение прохождения, способности, Lobby и multiplayer не реализованы.
 
 Все новые экраны DONER GAME должны следовать **Hi-Bit Lo-Fi Pixel Art**: [единая art direction](docs/ART_DIRECTION.md), tokens — `apps/web/src/tokens.css`.
 
@@ -30,20 +30,23 @@ apps/
     .env.example
   web/
     src/
-      App.tsx                  # Home / Campaign / Character Select, навигация
+      App.tsx                  # Home / Campaign / Character Select / Game, навигация
       api.ts                   # HTTP client, access token только в памяти
       usePlayerAuth.ts         # loading / authenticated / error / browser
       telegram.ts              # SDK lifecycle, theme, launch params
       CharacterSelect.tsx      # открытие и выбор персонажа
-      CampaignScreen.tsx       # карта-заглушка, 3 уровня
+      CampaignScreen.tsx       # карта главы, запуск первого уровня
+      GameScreen.tsx           # React HUD, pause, controls, Phaser lifecycle
+      game/                    # level, launch, input, textures, createGame, lifecycle
+      game.css                 # мобильный HUD и canvas с целым масштабом
       PlayerPanel.tsx          # аккаунт + компактный HUD
       PixelArt.tsx             # оригинальные prototype portraits/icons
       DonerMark.tsx
       tokens.css               # центральные дизайн-токены
       styles.css
-    test/                      # Telegram helpers и HTTP client
+    test/                      # Telegram, HTTP client, game logic; browser/game.mjs
     .env.example
-packages/shared/               # общий runtime character catalog и DTO, без Prisma
+packages/shared/               # runtime character/world theme catalogs и DTO, без Prisma
 ```
 
 ## Требования и установка
@@ -265,7 +268,7 @@ curl -i https://YOUR-API.up.railway.app/health
 1. В **Settings → Environment Variables** добавьте `VITE_API_URL=https://YOUR-API.up.railway.app` для **Production** (и Preview, если нужен). Это URL API без `/health` и `/auth/telegram`.
 2. Сохраните `ENABLE_EXPERIMENTAL_COREPACK=1` для выбора закреплённого pnpm. **BOT_TOKEN, JWT_SECRET, DATABASE_URL в Vercel не добавляйте.**
 3. Выполните **Redeploy**: изменение variable без сборки не меняет уже опубликованный JavaScript.
-4. Откройте постоянный публичный production URL в обычном браузере: должен появиться Development Mode, версия `v0.4 Campaign Prototype`, без debug-блока. Frontend должен открываться без Vercel Authentication.
+4. Откройте постоянный публичный production URL в обычном браузере: должен появиться Development Mode, версия `v0.5 Playable Prototype`, без debug-блока. Frontend должен открываться без Vercel Authentication.
 5. В Railway `CORS_ORIGINS` должен совпадать именно с этим frontend origin. В BotFather Main Mini App URL остаётся URL frontend; API URL туда не вставляйте.
 
 [Настройка Vite в Vercel](https://vercel.com/docs/frameworks/frontend/vite), [сборка и Corepack](https://vercel.com/docs/builds/configure-a-build).
@@ -282,6 +285,8 @@ curl -i https://YOUR-API.up.railway.app/health
 Настоящий вход через ваш bot и облачная база требуют ваших secrets и ручного deployment. Локальные тесты используют отдельную PostgreSQL и синтетические подписанные данные; это не замена финальной проверке в Telegram.
 
 ## Stage 4 — Campaign & Characters
+
+Описание завершённого Stage 4 ниже сохранено как история backend/economy изменений. Актуальный запуск уровня и инструкции обновления frontend — в разделе Stage 5.
 
 Весь Mini App использует Hi-Bit Lo-Fi design system: тёмный фон, оранжевый DONER, cream text, ступенчатые рамки, жёсткие pixel shadows, компактный HUD, лёгкий dithering и scanlines. Home, Campaign, Character Select, loading/error/retry и Party placeholder оформлены единообразно. Правила для следующих этапов — [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md). Персонажи и эмблема — оригинальные SVG на пиксельной сетке, без внешних art/font CDN.
 
@@ -317,3 +322,67 @@ API блокирует строку User через параметризован
 6. Проверьте Home → Campaign → Character Select → Back, locked Aigerim/Temik по 1 Doner, disabled запуск уровня и Party «Скоро». Покупки с достаточным балансом, double unlock и rollback проверяются на отдельной тестовой PostgreSQL; начислять деньги через production API невозможно.
 
 Для автоматической проверки экономики: `TEST_DATABASE_URL=... pnpm test` после миграции отдельной базы с суффиксом `_test`. Набор включает starter новых/существующих игроков, идемпотентность, locked selection, оба независимых unlock, сохранение выбора, недостаточный баланс, конкуренцию через два подключения, rollback после ошибки вставки и реальные HTTP responses. Ни один тест не подключается к production автоматически.
+
+## Stage 5 — First Playable Phaser Prototype
+
+Первый playable vertical slice: **Home → Сюжет → Играть · Уровень 1** с текущим персонажем. Если выбор отсутствует, откройте «Выбрать персонажа». На Character Select после подтверждённого выбора также есть кнопка игры. При выходе видимая Back и Telegram BackButton возвращают на экран, откуда уровень запущен.
+
+**Проверка доступа.** `game/launch.ts` получает `selectedCharacterId` и `unlockedCharacterIds` из authenticated profile. Известный персонаж должен одновременно быть выбран и открыт; баланс не даёт права запуска locked character. Во время выбора запуск запрещён до ответа существующего `PUT /me/character`. Auth flow, JWT в памяти и `/me` сохранены. Игровой runtime вообще не импортирует API client и не отправляет запросов о прохождении.
+
+**Phaser и React.** `GameScreen.tsx` отвечает за заголовок, HUD, паузу, подсказки, loading/error/retry и мобильные controls. Engine **Phaser 4.2.1** импортируется динамически только при входе в игру; Home/Campaign не загружают его. `game/createGame.ts` создаёт одну scene с Arcade Physics, Canvas renderer, `pixelArt` и `roundPixels`. Canvas отображается в целочисленном 2×; ResizeObserver изменяет viewport без изменения уровня. При выходе снимаются DOM/Telegram listeners и ResizeObserver, сбрасывается ввод, вызывается `game.destroy(true, false)`, canvas удаляется. Поздний результат lazy import не создаёт игру после unmount, включая React StrictMode. Phaser завершает собственное уничтожение на следующем кадре; core plugins оставлены доступными для повторного запуска. [Phaser game lifecycle](https://docs.phaser.io/phaser/concepts/game).
+
+**Уровень и управление.** `game/level.ts` задаёт LevelDefinition: id, name, availability, world bounds, spawn, goal, массив прямоугольных платформ. Пока доступен один уровень 1200×344 logical px; два следующих остаются заглушками. Непрерывная земля, уступы и верхние площадки позволяют исследовать короткий участок без смерти/respawn. Камера следует за игроком и ограничена миром. Ускорение/торможение, gravity, небольшой jump buffer 100 ms и coyote time 80 ms делают управление мягче; удержание прыжка не вызывает автоматические повторные прыжки.
+
+- Desktop: **A/D или ←/→**, прыжок **Space/W/↑**, пауза **P/Escape**.
+- Mobile: **Влево / Вправо / Прыжок** под игровым полем; поддержаны несколько пальцев, pointer capture, отмена касания и release.
+- Потеря фокуса/скрытие вкладки ставит игру на паузу и очищает ввод; продолжение явное. На Telegram 7.7+ жесты сворачивания при игре временно отключаются и восстанавливаются при выходе. [Telegram Mini Apps API](https://core.telegram.org/bots/webapps#initializing-mini-apps).
+- У флага появляется подсказка. **Completion rewards, Doner/Golden Doner и campaign progression не реализованы.** Выход не обновляет production progress.
+
+**Три мира.** `packages/shared/src/worldThemes.ts` содержит типизированный catalog: themeId, characterId, displayName, palette, background/platform/decor styles и player colors. Mapper по выбранному ID даёт:
+
+| selectedCharacterId | themeId | Представление |
+| --- | --- | --- |
+| `altoha` | `altoha-city` | night city, небоскрёбы, neon signs, orange/cyan, металлические платформы |
+| `aigerim` | `aigerim-imperial` | violet imperial courtyard, арки, колонны, gold/burgundy banners, камень |
+| `temik` | `temik-bazaar` | desert bazaar, песчаные крыши, арки, навесы, terracotta/red/teal |
+
+Геометрия и физика общие, визуальные генераторы выбираются через catalog. `game/textures.ts` программно создаёт собственные tiles 32×32, два слоя фона 256×512, тематический декор, флаг и четыре кадра персонажа 16×24. Чужих или скачанных изображений нет. Позже достаточно заменить источник текстур/кадров на собственные sprite sheets, сохранив согласованный body и размеры. Parallax двух фонов (0.14/0.38) отключается при reduced motion; обязательное движение игрока/камеры сохраняется. Правила подробно описаны в [ART_DIRECTION.md](docs/ART_DIRECTION.md#15-in-game-worlds--stage-5).
+
+**Локальная игра без Telegram.** Запустите `pnpm dev:web`, откройте браузер → Сюжет → `LOCAL DEVELOPMENT PREVIEW` → Altoha/Aigerim/Temik. Можно проверить все миры без API/БД/credentials. Это отдельный просмотр, а не покупка или fake account: он требует `import.meta.env.DEV` и browser state без initData. В production и при Telegram auth error кнопок preview нет; обычный browser shell остаётся доступным. Реальный аккаунт играет только открытым персонажем.
+
+**Проверки:**
+
+```bash
+pnpm typecheck
+pnpm build
+pnpm test
+# Для полного regression экономики вместо пропуска DB integration:
+TEST_DATABASE_URL=postgresql://user:password@localhost:5432/doner_test pnpm test
+```
+
+Новые unit tests: все три mapping, запуск открытого/отказ locked, отсутствие selection, dev gating, Back origin, geometry, несколько источников ввода, jump edge, unmount во время import, destroy, ошибки загрузки и lifecycle жестов Telegram. Старые тесты авторизации/API/бота остаются в общем запуске. DB integration требует отдельную мигрированную `*_test` базу, не production.
+
+Воспроизводимые браузерные тесты используют настоящий Phaser/Chromium и синтетические HTTP/Telegram fixtures. Они не покупают персонажей реального пользователя и не обращаются к production API:
+
+```bash
+pnpm --filter @doner-game/web exec playwright install chromium
+# Терминал 1: сначала собрать runtime shared, затем запустить web
+pnpm --filter @doner-game/shared build
+VITE_API_URL=http://127.0.0.1:3013 pnpm --filter @doner-game/web dev --port 5185 --strictPort
+# Терминал 2
+pnpm --filter @doner-game/web test:browser
+```
+
+Для production UI: собрать `VITE_API_URL=http://127.0.0.1:3013 pnpm build:web`, запустить `pnpm --filter @doner-game/web preview --port 4185 --strictPort`, затем `BROWSER_TEST_URL=http://127.0.0.1:4185 BROWSER_TEST_PRODUCTION=1 pnpm --filter @doner-game/web test:browser`. URL localhost здесь только тестовая подстановка; production собирается с прежним настоящим `VITE_API_URL` из Vercel. `BROWSER_SCREENSHOT_DIR` опционально сохраняет три скриншота в существующий каталог.
+
+Browser suite проверяет запуск из Campaign и Character Select, три темы, locked/missing selection, server-confirmed выбор, reload/auth hook, UI/Telegram Back, повторные входы, cleanup keyboard/canvas, все controls и отсутствие overflow на **320/375/390/430/500 px**. Dev suite дополнительно проверяет реальную физику: движение, прыжок, landing, collision, camera, bounds, флаг, pause и native multi-touch/cancel. Production suite проверяет отсутствие local preview. Это эмуляция браузера: финальная проверка внутри настоящих Telegram iOS/Android остаётся ручной.
+
+**Ручной production deployment Stage 5:**
+
+1. После review отправьте изменения в свой Git repository и вручную запустите frontend deploy в Vercel. Автоматический deployment в рамках работы над Stage 5 не выполняется.
+2. Используйте существующие параметры: `pnpm install --frozen-lockfile`, Build **`pnpm build:web`**, Output **`apps/web/dist`**, текущий `VITE_API_URL`. Новых env variables нет; `.env` менять не нужно.
+3. **Новых migrations/backend endpoints нет.** Если Stage 4 API уже развёрнут, для Stage 5 не нужны redeploy API/бота и изменения PostgreSQL. Shared остаётся частью root build graph.
+4. Откройте Mini App заново: версия **v0.5 Playable Prototype**. Проверьте вход, Campaign → level 1, A/D/прыжок, mobile controls, pause, UI и Telegram Back, повторный запуск. Для уже открытых персонажей проверьте соответствующие миры; locked персонажи недоступны для игры.
+5. После выхода баланс и campaignStage должны остаться прежними. Проверьте safe-area и touch на реальных Telegram iOS/Android. Убедитесь, что local preview и диагностические координаты отсутствуют в production.
+
+**Ограничения.** Один короткий уровень и временные спрайты, без звука, врагов, урона, смерти, checkpoints, rewards, inventory, abilities и multiplayer. Пауза локальная, перезагрузка начинает уровень со spawn. Phaser загружается отдельным chunk около 1.38 MB (360 kB gzip); Vite сообщает ожидаемое предупреждение >500 kB. Он не входит в начальную загрузку меню. Производительность на реальных устройствах ещё требует ручной проверки. Stage 6 не начат.

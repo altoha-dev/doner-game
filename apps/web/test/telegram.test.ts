@@ -6,6 +6,7 @@ import {
   getTelegramWebApp,
   initializeTelegram,
   isTelegramLaunch,
+  suspendTelegramGameSwipes,
 } from '../src/telegram.ts';
 
 type WebApp = NonNullable<ReturnType<typeof getTelegramWebApp>>;
@@ -40,6 +41,22 @@ function setWindow(webApp?: WebApp, search = '', hash = ''): void {
     value: { location: { search, hash }, Telegram: { WebApp: webApp } },
   });
 }
+
+test('game disables Telegram swipes only on supported clients and restores the prior state', () => {
+  const calls: string[] = [];
+  const webApp = makeWebApp({ initData: 'test', isVersionAtLeast: version => version === '7.7', isVerticalSwipesEnabled: true,
+    disableVerticalSwipes: () => { calls.push('disable'); }, enableVerticalSwipes: () => { calls.push('enable'); } });
+  suspendTelegramGameSwipes(webApp)?.();
+  assert.deepEqual(calls, ['disable', 'enable']);
+  calls.length = 0;
+  suspendTelegramGameSwipes({ ...webApp, isVerticalSwipesEnabled: false })?.();
+  assert.deepEqual(calls, ['disable']);
+  calls.length = 0;
+  suspendTelegramGameSwipes({ ...webApp, isVersionAtLeast: () => false })?.();
+  suspendTelegramGameSwipes({ ...webApp, initData: '' })?.();
+  suspendTelegramGameSwipes(undefined)?.();
+  assert.deepEqual(calls, []);
+});
 
 test('без window и Telegram API функции безопасны', () => {
   assert.equal(getTelegramWebApp(), undefined);
