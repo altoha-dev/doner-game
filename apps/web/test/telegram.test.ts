@@ -160,7 +160,7 @@ test('ready/expand вызываются и для доступного SDK вн�
     offEvent: (event, callback) => { assert.equal(event, 'themeChanged'); handlers.delete(callback); },
   });
   const cleanup = initializeTelegram(webApp);
-  assert.deepEqual(calls, ['ready', 'expand', 'background:#121412', 'header:#121412']);
+  assert.deepEqual(calls, ['ready', 'expand', 'background:#101e38', 'header:#101e38']);
   assert.equal(styles.get('--telegram-accent'), '#2481CC');
   webApp.themeParams = { button_color: '#55aaff' };
   handlers.forEach(callback => callback());

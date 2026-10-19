@@ -11,3 +11,4 @@ coverage/
 .vscode/
 .idea/
 apps/api/src/generated/
+artifacts/

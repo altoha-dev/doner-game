@@ -1,8 +1,8 @@
-export type GameMode = 'home' | 'solo' | 'party';
+export type GameMode = 'home' | 'training' | 'party';
 export { CHARACTERS, STARTER_CHARACTER, getCharacter } from './characters.js';
 export type { CharacterId, CharacterDefinition } from './characters.js';
-export { WORLD_THEMES, getWorldTheme } from './worldThemes.js';
-export type { WorldTheme } from './worldThemes.js';
+export * from './party.js';
+export { SNOWY_CHAOS } from './arena.js';
 
 export interface PlayerDto {
   id: string;

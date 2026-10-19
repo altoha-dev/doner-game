@@ -1,155 +1,57 @@
-import type Phaser from 'phaser';
-import type { WorldTheme } from '@doner-game/shared';
+import Phaser from 'phaser';
+import { CHARACTER_COLORS } from './playerVisual';
+import type { CharacterId } from '@doner-game/shared';
 
-type Paint = (context: CanvasRenderingContext2D) => void;
-type Palette = WorldTheme['palette'];
-const rect = (c: CanvasRenderingContext2D, color: string, x: number, y: number, w: number, h: number) => {
-  c.fillStyle = color; c.fillRect(x, y, w, h);
-};
-
-function texture(scene: Phaser.Scene, key: string, width: number, height: number, paint: Paint) {
-  const canvas = document.createElement('canvas');
-  canvas.width = width; canvas.height = height;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D unavailable');
-  context.imageSmoothingEnabled = false;
-  paint(context);
-  const result = scene.textures.addCanvas(key, canvas);
-  if (!result) throw new Error('Texture creation failed');
-  return result;
-}
-
-// Original, deterministic shapes. All art generation is confined to this module.
-const backgrounds: Record<WorldTheme['backgroundStyle'], (c: CanvasRenderingContext2D, p: Palette, near: boolean) => void> = {
-  city(c, p, near) {
-    for (let i = 0; i < 8; i++) {
-      const x = i * 36 - 8, h = near ? 38 + (i * 13) % 35 : 70 + (i * 29) % 85;
-      rect(c, near ? p.middle : p.distant, x, 512 - h, 28, h);
-      rect(c, near ? p.middle : p.distant, x + 8, 506 - h, 12, 6);
-      for (let y = 520 - h; y < 500; y += 14) {
-        rect(c, near ? p.edge : p.middle, x + 5, y, 3, 4);
-        if (i % 2 === 0) rect(c, near ? p.secondary : p.middle, x + 17, y, 3, 4);
-      }
-      if (near && i % 3 === 0) { rect(c, p.shadow, x + 2, 482, 23, 9); rect(c, p.accent, x + 5, 485, 15, 2); }
-    }
-  },
-  imperial(c, p, near) {
-    const top = near ? 440 : 385, color = near ? p.middle : p.distant;
-    for (let x = -8; x < 256; x += 64) {
-      rect(c, color, x, top, 60, 9);
-      rect(c, color, x + 6, top - 6, 48, 6);
-      rect(c, color, x + 8, top + 9, 12, 125);
-      rect(c, color, x + 44, top + 9, 12, 125);
-      rect(c, color, x + 18, top + 9, 28, 8);
-      rect(c, color, x + 20, top + 17, 6, 8);
-      rect(c, color, x + 38, top + 17, 6, 8);
-      if (near) {
-        rect(c, p.edge, x + 10, top + 12, 2, 49);
-        rect(c, p.secondary, x + 28, top + 21, 10, 27);
-        rect(c, p.accent, x + 28, top + 21, 10, 2);
-        rect(c, p.accent, x + 32, top + 29, 2, 9);
-      }
-    }
-  },
-  bazaar(c, p, near) {
-    for (let i = 0; i < 5; i++) {
-      const x = i * 58 - 14, h = near ? 54 + (i % 2) * 12 : 86 + (i * 19) % 60;
-      const color = near ? p.middle : p.distant;
-      rect(c, color, x, 512 - h, 48, h);
-      rect(c, color, x + 6, 506 - h, 36, 6);
-      rect(c, color, x + 12, 500 - h, 24, 6);
-      rect(c, near ? p.shadow : p.middle, x + 17, 524 - h, 14, 28);
-      rect(c, color, x + 17, 524 - h, 3, 4);
-      rect(c, color, x + 28, 524 - h, 3, 4);
-      if (near) {
-        rect(c, p.shadow, x + 2, 487, 44, 4);
-        for (let stripe = 0; stripe < 6; stripe++) rect(c, stripe % 2 ? p.edge : p.secondary, x + 3 + stripe * 7, 479, 7, 10);
-        rect(c, p.edge, x + 4, 489, 2, 23); rect(c, p.edge, x + 43, 489, 2, 23);
-      }
-    }
-  },
-};
-
-const tiles: Record<WorldTheme['platformStyle'], (c: CanvasRenderingContext2D, p: Palette) => void> = {
-  metal(c, p) {
-    rect(c, p.shadow, 0, 15, 32, 1); rect(c, p.shadow, 31, 0, 1, 32);
-    rect(c, p.edge, 3, 5, 2, 2); rect(c, p.edge, 27, 5, 2, 2);
-    rect(c, p.middle, 8, 9, 17, 3); rect(c, p.accent, 0, 0, 8, 2);
-  },
-  stone(c, p) {
-    rect(c, p.shadow, 0, 14, 32, 2); rect(c, p.shadow, 23, 3, 1, 12);
-    rect(c, p.shadow, 9, 16, 1, 16); rect(c, p.edge, 3, 6, 8, 1);
-    rect(c, p.middle, 15, 22, 10, 2);
-  },
-  sandstone(c, p) {
-    rect(c, p.shadow, 0, 15, 32, 1); rect(c, p.shadow, 21, 3, 1, 12);
-    rect(c, p.shadow, 8, 16, 1, 16);
-    for (let i = 0; i < 9; i++) rect(c, p.edge, (i * 13) % 32, 5 + (i * 7) % 26, 1, 1);
-  },
-};
-
-const decorations: Record<WorldTheme['decorStyle'], (c: CanvasRenderingContext2D, p: Palette) => void> = {
-  signs(c, p) {
-    rect(c, p.edge, 14, 13, 3, 35); rect(c, p.shadow, 1, 2, 30, 19);
-    rect(c, p.secondary, 3, 4, 26, 15); rect(c, p.shadow, 5, 6, 22, 11);
-    rect(c, p.accent, 8, 9, 12, 2); rect(c, p.accent, 18, 11, 5, 2);
-  },
-  banners(c, p) {
-    rect(c, p.edge, 4, 2, 3, 46); rect(c, p.accent, 4, 2, 23, 3);
-    rect(c, p.secondary, 10, 5, 16, 28); rect(c, p.secondary, 13, 33, 10, 4);
-    rect(c, p.accent, 17, 12, 2, 14); rect(c, p.accent, 13, 16, 10, 2);
-  },
-  awnings(c, p) {
-    rect(c, p.shadow, 2, 18, 2, 30); rect(c, p.shadow, 28, 18, 2, 30);
-    for (let i = 0; i < 5; i++) rect(c, i % 2 ? p.light : p.secondary, 1 + i * 6, 13, 6, 10);
-    rect(c, p.edge, 1, 12, 30, 2); rect(c, p.surface, 7, 37, 17, 11);
-    rect(c, p.accent, 10, 33, 6, 4); rect(c, p.secondary, 19, 35, 4, 2);
-  },
-};
-
-export function createPrototypeTextures(scene: Phaser.Scene, theme: WorldTheme) {
-  const p = theme.palette;
-  texture(scene, 'far', 256, 512, c => {
-    rect(c, p.sky, 0, 0, 256, 512);
-    rect(c, p.light, 189, 345, 18, 18);
-    rect(c, p.sky, 189, 345, 4, 4); rect(c, p.sky, 203, 359, 4, 4);
-    if (theme.backgroundStyle !== 'bazaar') {
-      for (let i = 0; i < 18; i++) rect(c, p.middle, (i * 47) % 256, 290 + (i * 17) % 160, 1, 1);
-    }
-    backgrounds[theme.backgroundStyle](c, p, false);
+// Original code-native pixel graphics. No downloaded packs or runtime image requests.
+export function createWinterTextures(scene: Phaser.Scene, id: CharacterId, includePlayer = true) {
+  const draw = (key: string, w: number, h: number, paint: (g: Phaser.GameObjects.Graphics) => void) => {
+    const g = scene.make.graphics({ x: 0, y: 0 }); paint(g); g.generateTexture(key, w, h); g.destroy();
+  };
+  draw('snow-rock', 16, 16, g => {
+    g.fillStyle(0x445c77).fillRect(0, 0, 16, 16); g.fillStyle(0x63829a).fillRect(1, 5, 8, 5).fillRect(10, 11, 5, 3);
+    g.fillStyle(0xb8d8e7).fillRect(0, 2, 16, 3); g.fillStyle(0xf1f5e9).fillRect(0, 0, 16, 3).fillRect(2, 3, 3, 2);
+    g.fillStyle(0x31495f).fillRect(0, 14, 16, 2).fillRect(9, 7, 3, 2);
   });
-  texture(scene, 'middle', 256, 512, c => backgrounds[theme.backgroundStyle](c, p, true));
-  texture(scene, 'platform', 32, 32, c => {
-    rect(c, p.surface, 0, 0, 32, 32); rect(c, p.edge, 0, 0, 32, 3);
-    tiles[theme.platformStyle](c, p);
+  draw('rock', 16, 16, g => { g.fillStyle(0x344b65).fillRect(0, 0, 16, 16); g.fillStyle(0x435e76).fillRect(2, 2, 10, 6).fillRect(7, 11, 9, 4); });
+  draw('ice', 16, 16, g => {
+    g.fillStyle(0x589db6).fillRect(0, 0, 16, 16); g.fillStyle(0xc9eef0).fillRect(0, 0, 16, 3);
+    g.fillStyle(0x9ad6df).fillRect(3, 4, 3, 7).fillRect(6, 3, 3, 4); g.fillStyle(0x366e92).fillRect(0, 14, 16, 2);
   });
-  texture(scene, 'decor', 32, 48, c => decorations[theme.decorStyle](c, p));
-  texture(scene, 'goal', 24, 48, c => {
-    rect(c, p.shadow, 1, 2, 4, 46); rect(c, p.light, 2, 2, 2, 46);
-    rect(c, p.accent, 4, 3, 19, 16); rect(c, p.light, 7, 6, 3, 3);
-    rect(c, p.light, 13, 6, 3, 3); rect(c, p.light, 10, 9, 3, 3);
-    rect(c, p.light, 16, 9, 3, 3); rect(c, p.light, 7, 12, 3, 3);
-    rect(c, p.light, 13, 12, 3, 3);
+  draw('built-block', 32, 16, g => {
+    g.fillStyle(0x885c42).fillRect(0, 0, 32, 16); g.fillStyle(0xc69567).fillRect(1, 3, 30, 10);
+    g.fillStyle(0x815538).fillRect(14, 4, 2, 10).fillRect(0, 13, 32, 3);
+    g.fillStyle(0xeaf5ec).fillRect(0, 0, 32, 3); g.fillStyle(0xffc780).fillRect(3, 5, 3, 3).fillRect(25, 5, 3, 3);
   });
-  const sheet = texture(scene, 'player', 64, 24, c => {
-    const a = theme.player;
-    for (let frame = 0; frame < 4; frame++) {
-      c.save(); c.translate(frame * 16, 0);
-      const step = frame === 1 ? 1 : frame === 2 ? -1 : 0;
-      rect(c, p.shadow, 4, 1, 9, 21);
-      rect(c, a.hair, 4, 1, 9, 7); rect(c, a.skin, 5, 5, 8, 6);
-      rect(c, a.hair, 4, 3, 9, 3); rect(c, p.shadow, 11, 7, 1, 2);
-      rect(c, a.outfit, 4, 11, 9, 7); rect(c, a.trim, 4, 11, 9, 2);
-      rect(c, a.skin, 2, frame === 3 ? 8 : 13 + step, 2, 4);
-      rect(c, a.skin, 13, frame === 3 ? 8 : 13 - step, 2, 4);
-      rect(c, a.trousers, 5, 18, 3, 4 + step); rect(c, a.trousers, 10, 18, 3, 4 - step);
-      rect(c, p.shadow, 4, 21 + step, 4, 2); rect(c, p.shadow, 10, 21 - step, 4, 2);
-      // Silhouette details, independent of the common collision body.
-      if (theme.characterId === 'altoha') rect(c, a.trim, 3, 4, 3, 3);
-      if (theme.characterId === 'aigerim') { rect(c, a.trim, 4, 2, 9, 2); rect(c, a.hair, 3, 6, 2, 7); }
-      if (theme.characterId === 'temik') { rect(c, a.outfit, 3, 1, 11, 3); rect(c, a.trim, 1, 12, 3, 3); }
-      c.restore();
+  draw('pine', 32, 56, g => {
+    g.fillStyle(0x735a50).fillRect(14, 42, 5, 14);
+    for (let i = 0; i < 3; i++) {
+      const x = 10 - i * 4, y = 4 + i * 12, w = 12 + i * 8;
+      g.fillStyle(0x2a6270).fillRect(x, y + 4, w, 12); g.fillStyle(0xbcd9dd).fillRect(x, y + 4, w, 3).fillRect(x + 4, y, w - 8, 4);
     }
   });
-  for (let i = 0; i < 4; i++) sheet.add(i, 0, i * 16, 0, 16, 24);
+  draw('lamp', 16, 48, g => {
+    g.fillStyle(0x273c56).fillRect(7, 12, 3, 36).fillRect(3, 46, 11, 2);
+    g.fillStyle(0x4d647b).fillRect(2, 4, 13, 15); g.fillStyle(0xffc571).fillRect(4, 6, 9, 10);
+    g.fillStyle(0xffe7ac).fillRect(5, 7, 3, 6); g.fillStyle(0xe3f1ed).fillRect(0, 2, 16, 3);
+  });
+  draw('snowman', 24, 32, g => {
+    g.fillStyle(0xd5e9ec).fillRect(3, 16, 18, 14).fillRect(6, 6, 12, 12);
+    g.fillStyle(0xffa252).fillRect(10, 17, 12, 3).fillRect(15, 12, 7, 2);
+    g.fillStyle(0x233c57).fillRect(8, 10, 2, 2).fillRect(14, 10, 2, 2).fillRect(11, 23, 2, 2).fillRect(4, 5, 16, 3).fillRect(7, 0, 10, 6);
+  });
+  if (!includePlayer) return;
+  draw(`winter-player-${id}`, 64, 24, g => {
+    const colors = CHARACTER_COLORS[id];
+    for (let i = 0; i < 4; i++) {
+      const x = i * 16, leg = i === 1 ? 1 : i === 2 ? -1 : 0;
+      g.fillStyle(0x182b45).fillRect(x + 3, 3, 10, 20);
+      g.fillStyle(colors.coat).fillRect(x + 3, 12, 10, 8).fillRect(x + 3, 3, 10, 4).fillRect(x + 5, 1, 6, 3);
+      g.fillStyle(0xf4cb9e).fillRect(x + 4, 7, 8, 6); g.fillStyle(0x20364e).fillRect(x + 9, 8, 2, 2);
+      g.fillStyle(colors.scarf).fillRect(x + 2, 12, 12, 2).fillRect(x + 1, 13, 3, 5);
+      g.fillStyle(0x24364d).fillRect(x + 3 + leg, 20, 4, 4).fillRect(x + 9 - leg, 20, 4, 4);
+      g.fillStyle(0xeaf4eb).fillRect(x + 3 + leg, 23, 4, 1).fillRect(x + 9 - leg, 23, 4, 1);
+    }
+  });
+  const texture = scene.textures.get(`winter-player-${id}`);
+  for (let frame = 0; frame < 4; frame++) texture.add(frame, 0, frame * 16, 0, 16, 24);
 }

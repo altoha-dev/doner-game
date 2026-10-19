@@ -1,63 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CHARACTERS } from '@doner-game/shared';
-import type { PlayerProgressDto } from '@doner-game/shared';
-import { getBackScreen } from '../src/campaign.ts';
-import { getPlayerLaunch, getPreviewLaunch } from '../src/game/launch.ts';
-import { LEVEL_ONE, MOVEMENT } from '../src/game/level.ts';
 import { GameInput, KEY_ACTIONS } from '../src/game/input.ts';
 import { mountAsyncGame } from '../src/game/lifecycle.ts';
 
-const progress: PlayerProgressDto = { doners: 0, goldenDoners: 0, campaignStage: 0, unlockedCharacterIds: ['altoha'], selectedCharacterId: 'altoha' };
-for (const [id, theme] of [['altoha', 'altoha-city'], ['aigerim', 'aigerim-imperial'], ['temik', 'temik-bazaar']] as const) {
-  test(`owned selected ${id} launches Level 1 with ${theme}`, () => {
-    const launch = getPlayerLaunch({ ...progress, selectedCharacterId: id, unlockedCharacterIds: [id] });
-    assert.equal(launch?.character.id, id);
-    assert.equal(launch?.theme.themeId, theme);
-    assert.equal(launch?.theme.characterId, id);
-    assert.equal(launch?.level, LEVEL_ONE);
-    assert.equal(launch?.preview, false);
-  });
-}
-test('a selected but locked character cannot launch, regardless of balance or stage', () => {
-  assert.equal(getPlayerLaunch({ ...progress, selectedCharacterId: 'aigerim', doners: 100, campaignStage: 10 }), null);
-  assert.equal(getPlayerLaunch({ ...progress, selectedCharacterId: 'temik' }), null);
-  assert.equal(getPlayerLaunch({ ...progress, unlockedCharacterIds: [] }), null);
-});
-test('unauthenticated, missing and unknown selection require character selection', () => {
-  assert.equal(getPlayerLaunch(undefined), null);
-  assert.equal(getPlayerLaunch({ ...progress, selectedCharacterId: null }), null);
-  assert.equal(getPlayerLaunch({ ...progress, selectedCharacterId: 'unknown', unlockedCharacterIds: ['unknown'] }), null);
-});
-test('launch never mutates server progress or awards completion', () => {
-  const before = structuredClone(progress);
-  getPlayerLaunch(progress);
-  assert.deepEqual(progress, before);
-});
-test('local world preview requires both a development build and browser mode', () => {
-  for (const character of CHARACTERS) {
-    assert.equal(getPreviewLaunch(character.id, false, true), null);
-    assert.equal(getPreviewLaunch(character.id, true, false), null);
-    assert.equal(getPreviewLaunch(character.id, true, true)?.preview, true);
-  }
-});
-test('Back returns to the launch origin and preserves existing menu navigation', () => {
-  assert.equal(getBackScreen('game', 'campaign'), 'campaign');
-  assert.equal(getBackScreen('game', 'characters'), 'characters');
-  assert.equal(getBackScreen('characters', 'campaign'), 'campaign');
-  assert.equal(getBackScreen('campaign', 'characters'), 'home');
-});
-test('safe ground covers the level and mandatory obstacles are jumpable', () => {
-  const ground = LEVEL_ONE.platforms[0];
-  assert.equal(ground.x, 0); assert.equal(ground.width, LEVEL_ONE.width);
-  assert.ok(LEVEL_ONE.spawn.x > 0 && LEVEL_ONE.spawn.x < LEVEL_ONE.goal.x);
-  assert.ok(LEVEL_ONE.spawn.y < ground.y && LEVEL_ONE.goal.x < LEVEL_ONE.width);
-  const jumpHeight = MOVEMENT.jump ** 2 / (2 * MOVEMENT.gravity);
-  for (const platform of LEVEL_ONE.platforms.slice(1)) {
-    assert.ok(platform.x + platform.width <= LEVEL_ONE.width);
-    if (platform.y + platform.height === ground.y) assert.ok(ground.y - platform.y < jumpHeight);
-  }
-});
 test('movement combines keyboard and multiple fingers without stuck releases', () => {
   const input = new GameInput();
   input.press('key:KeyD', 'right'); input.press('pointer:1', 'right');

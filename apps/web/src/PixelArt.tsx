@@ -21,14 +21,14 @@ export function PixelIcon({ name, className = '' }: { name: keyof typeof icons; 
 // a local PNG/WebP <img> later; cards and profile panels keep the same contract.
 const portraitColors: Record<CharacterId, { coat: string; light: string; hair: string }> = {
   altoha: { coat: '#d97a36', light: '#ffc16e', hair: '#473c31' },
-  aigerim: { coat: '#668269', light: '#bbcd94', hair: '#41372f' },
-  temik: { coat: '#a68d4e', light: '#e2c882', hair: '#393c36' },
+  aigerim: { coat: '#ab92e8', light: '#f4c8e0', hair: '#41372f' },
+  temik: { coat: '#67c8ba', light: '#ecbb6c', hair: '#393c36' },
 };
 export function CharacterPortrait({ characterId, className = '' }: { characterId?: CharacterId | undefined; className?: string }) {
   const colors = characterId ? portraitColors[characterId] : { coat: '#505c52', light: '#899485', hair: '#343b34' };
   return <svg className={`character-portrait ${className}`} viewBox="0 0 32 32" role="img" aria-label={characterId ? `Портрет ${characterId} — прототип` : 'Пиксельный аватар'} shapeRendering="crispEdges">
-    <path fill="#202820" d="M0 0h32v32H0z" />
-    <path fill="#354133" d="M0 0h2v2H0zm30 0h2v2h-2zM0 30h2v2H0zm30 0h2v2h-2zM4 6h2v2H4zm22 14h2v2h-2zM4 23h2v2H4z" />
+    <path fill="#172b43" d="M0 0h32v32H0z" />
+    <path fill="#36536c" d="M0 0h2v2H0zm30 0h2v2h-2zM0 30h2v2H0zm30 0h2v2h-2zM4 6h2v2H4zm22 14h2v2h-2zM4 23h2v2H4z" />
     <path fill="#121812" d="M7 31v-6h4v-4H9V10h2V6h12v4h2v11h-3v4h4v6z" />
     <path fill={colors.coat} d="M5 32v-6h3v-3h5v-3h7v3h5v3h3v6z" />
     <path fill={colors.light} d="M8 25h5v2H8zm12 0h4v2h-4zM14 25h4v7h-4z" />
