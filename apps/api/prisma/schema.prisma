@@ -22,6 +22,7 @@ model User {
   lastLoginAt        DateTime            @default(now()) @db.Timestamptz(3)
   progress           PlayerProgress?
   unlockedCharacters UnlockedCharacter[]
+  roomPlayers        RoomPlayer[]
 }
 
 model PlayerProgress {
@@ -44,4 +45,73 @@ model UnlockedCharacter {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, characterId])
+}
+
+// Stage 6.1: additive room state. PlayerProgress/economy remain untouched.
+model Room {
+  id              String          @id @default(uuid()) @db.Uuid
+  code            String          @unique @db.VarChar(6)
+  hostUserId      String          @db.Uuid
+  phase           String          @default("LOBBY")
+  capacity        Int             @default(4)
+  currentRound    Int             @default(0)
+  revision        Int             @default(0)
+  deadline        DateTime?       @db.Timestamptz(3)
+  raceStartedAt   DateTime?       @db.Timestamptz(3)
+  recoveryMessage String?
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @db.Timestamptz(3)
+  expiresAt       DateTime        @db.Timestamptz(3)
+  players         RoomPlayer[]
+  rounds          MatchRound[]
+  placements      TrapPlacement[]
+  finishes        RoundFinish[]
+  @@index([expiresAt])
+}
+model RoomPlayer {
+  roomId            String   @db.Uuid
+  userId            String   @db.Uuid
+  activeUserId      String?  @unique @db.Uuid
+  chosenCharacterId String
+  ready             Boolean  @default(false)
+  connected         Boolean  @default(false)
+  left              Boolean  @default(false)
+  buildDone         Boolean  @default(false)
+  seat              Int
+  joinedAt          DateTime @default(now()) @db.Timestamptz(3)
+  room              Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([roomId, userId])
+}
+model MatchRound {
+  roomId      String    @db.Uuid
+  roundNumber Int
+  phase       String
+  startedAt   DateTime  @default(now()) @db.Timestamptz(3)
+  endedAt     DateTime? @db.Timestamptz(3)
+  room        Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  @@id([roomId, roundNumber])
+}
+model TrapPlacement {
+  placementId String   @id
+  roomId      String   @db.Uuid
+  roundNumber Int
+  userId      String   @db.Uuid
+  objectType  String
+  gridX       Int
+  gridY       Int
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  @@unique([roomId, roundNumber, userId])
+}
+model RoundFinish {
+  roomId          String    @db.Uuid
+  roundNumber     Int
+  userId          String    @db.Uuid
+  status          String
+  finishPosition  Int?
+  finishTimestamp DateTime? @db.Timestamptz(3)
+  finishDuration  Int?
+  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  @@id([roomId, roundNumber, userId])
+  @@unique([roomId, roundNumber, finishPosition])
 }

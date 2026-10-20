@@ -66,7 +66,7 @@ try {
   assert.ok(!requests.some(r => /phaser|createGame|game-assets/.test(r.url)), 'lazy engine on Home');
   await widthChecks(page, 'home');
   for (const label of ['СОЗДАТЬ КОМНАТУ', 'ВОЙТИ ПО КОДУ']) {
-    await page.getByRole('button', { name: label, exact: true }).click(); await page.getByText('Multiplayer coming in Stage 6.1').waitFor(); await page.getByRole('button', { name: '← НАЗАД', exact: true }).click(); checks++;
+    await page.getByRole('button', { name: label, exact: true }).click(); await page.getByRole('heading', { name: 'ИГРА С ДРУЗЬЯМИ' }).waitFor(); await page.getByRole('button', { name: '← НАЗАД', exact: true }).click(); checks++;
   }
   for (const label of ['МОЙ ПРОФИЛЬ', 'КАК ИГРАТЬ', 'НАСТРОЙКИ']) {
     await page.getByRole('button', { name: label, exact: true }).click(); await page.getByRole('heading', { name: label, exact: true }).waitFor(); await page.evaluate(() => window.__back()); checks++;

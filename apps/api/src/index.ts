@@ -1,3 +1,4 @@
+import { attachMultiplayer } from './multiplayer/socket.js';
 import { buildApp } from './app.js';
 import { ConfigurationError, loadApiEnvironment, parseConfig } from './config.js';
 import { createDatabase } from './db.js';
@@ -7,7 +8,8 @@ async function main(): Promise<void> {
   loadApiEnvironment();
   const config = parseConfig(process.env);
   const db = createDatabase(config.databaseUrl);
-  const app = await buildApp(config, createPlayerStore(db));
+  const players = createPlayerStore(db);
+  const app = await buildApp(config, players);
   app.addHook('onClose', async () => { await db.$disconnect(); });
   let stopping = false;
   const shutdown = (): void => {
@@ -24,6 +26,7 @@ async function main(): Promise<void> {
   try {
     // Fail early if PostgreSQL is unavailable. /health is a simple liveness check.
     await db.$connect();
+    await attachMultiplayer(app, config, players, db);
     if (stopping) return;
     await app.listen({ host: '0.0.0.0', port: config.port });
     app.log.info(`DONER GAME API started on http://localhost:${config.port}`);

@@ -1,8 +1,8 @@
-# DONER GAME — v0.6 Party Reboot Prototype
+# DONER GAME — v0.6.1 Real Multiplayer Prototype
 
-Telegram Mini App + Bot. Новая концепция — **Winter Party Edition**, multiplayer party platformer на одной общей карте. Stage 6.0 реализует локальную тренировку BUILD → RACE → RESULTS. Сетевые комнаты и магазин пока не реализованы; их кнопки сообщают о Stage 6.1.
+Telegram Mini App + Bot. **Winter Party Edition** — multiplayer party platformer на одной общей карте. Stage 6.1 добавляет реальные комнаты 2–4 игроков: LOBBY → общий BUILD → RACE → одинаковые RESULTS → NEXT с сохранением блоков. Локальная тренировка сохранена. Магазина, abilities, rewards и изменений Doner нет.
 
-[Итоговый отчёт Stage 6.0: изменения, проверки, архив и скриншоты](docs/STAGE_6_REPORT.md).
+[Отчёт Stage 6.1](docs/STAGE_6_1_REPORT.md) · [Карта прогресса](docs/STAGE_6_1_PROGRESS.md) · [Deployment и тест с другом](docs/TELEGRAM_MULTIPLAYER_TEST_PLAN.md) · [Исторический отчёт Stage 6.0](docs/STAGE_6_REPORT.md).
 
 ## Попробовать
 
@@ -16,7 +16,9 @@ pnpm dev:web
 
 На клавиатуре A/D или ←/→, W/↑/Space для прыжка, P/Escape для паузы. На телефоне отдельные кнопки. BUILD использует касание, точные стрелки и ползунок обзора карты. До 12 бесплатных блоков/раундов; реальные Doner не начисляются и не списываются.
 
-Для чистой установки: `pnpm install`, затем `pnpm db:generate`. Существующие заполненные `.env` сохраняются. API можно запустить `pnpm dev:api` с уже подготовленной локальной БД, бот — `pnpm dev:bot`. `pnpm dev` запускает все приложения; на одном bot token не запускайте второй polling-процесс. Stage 6.0 не требует новых миграций.
+Для чистой установки: `pnpm install`, затем `pnpm db:generate`. Существующие заполненные `.env` сохраняются. Для online примените `pnpm db:deploy` **только к подготовленной локальной БД**, затем `pnpm dev:api`; бот — `pnpm dev:bot`. `pnpm dev` запускает все приложения; на одном bot token не запускайте второй polling-процесс. Production migration выполняется отдельно по инструкции после разрешённого deployment.
+
+Для комнат нужен настоящий Telegram auth. Создатель выбирает capacity, делится кодом/ссылкой; друг подтверждает вход, оба выбирают любого героя и нажимают ГОТОВ. Host запускает матч. По одному бесплатному блоку или SKIP; BUILD 60s, RACE 90s, до 5 раундов. Без Telegram доступна тренировка, fake-auth endpoint в production отсутствует.
 
 ## Архитектура
 
@@ -25,6 +27,8 @@ apps/web/src/
   App.tsx, WinterScene.tsx          зимний Home и навигация
   CharacterSelect.tsx             выбор без покупки; browser training selection
   PlayerPanel.tsx                 Telegram identity/avatar, Doner, выбранный герой
+  PartyScreen.tsx, party.css      create/join, lobby, invite, ready, reconnect
+  multiplayer/connection.ts      typed Socket.IO client, snapshot store/session adapter
   GameScreen.tsx                  BUILD/RACE/RESULTS UI, input и lifecycle
   game/localSession.ts            immutable состояние локального матча
   game/createGame.ts              Phaser, collisions, camera, phase presentation
@@ -36,18 +40,20 @@ apps/web/src/
 packages/shared/src/
   arena.ts                       единая geometry/spawns/finish/placement areas
   party.ts                       contracts, placement validation, future rules
+  online.ts                      socket events, room snapshots, online rules, invite helper
   characters.ts, index.ts         стабильные IDs, существующие account DTO
-apps/api/                        существующие Fastify/auth/Prisma/PostgreSQL
+apps/api/src/multiplayer/        Socket.IO, RoomManager, store, movement/payload validation
+apps/api/                        существующие Fastify/auth/Prisma/PostgreSQL + additive rooms
 apps/bot/                        существующие grammY /start /help /game
 ```
 
-`selectedCharacterId` выбирает только героя. `SNOWY_CHAOS` и MatchSnapshot общие. Geometry, визуальные плитки, spawn, finish и зоны строительства разделены. Phaser получает snapshot через runtime adapter; локальная session позже заменяется сетевой authority. Подробности: [game design](docs/GAME_DESIGN.md), [multiplayer plan](docs/MULTIPLAYER_ARCHITECTURE.md), [art direction](docs/ART_DIRECTION.md).
+`selectedCharacterId` выбирает только героя. `SNOWY_CHAOS` и MatchSnapshot общие. Geometry, visual tiles, spawn, finish и placement areas разделены. Один Phaser engine работает с local session или server snapshot adapter. Server owns membership/phase/placements/results; физика локальная с серверной проверкой допустимости движения. Подробности: [game design](docs/GAME_DESIGN.md), [multiplayer architecture](docs/MULTIPLAYER_ARCHITECTURE.md), [art direction](docs/ART_DIRECTION.md).
 
 ## Аккаунт и database safety
 
 Сохранены Telegram initData HMAC → JWT → GET /me, Telegram user ID, имя/username/avatar, account connection/error/retry, selected character и balances. JWT остаётся только в памяти. initDataUnsafe не подтверждает личность. Старые startapp=solo не открывают удалённый Campaign.
 
-Prisma schema и все migrations **не изменялись**. User, PlayerProgress, UnlockedCharacter сохранены, включая legacy campaignStage/goldenDoners и старый unlock endpoint для совместимости. Новый UI не вызывает покупки. Новых Room/Match таблиц, reward endpoint и WebSocket server нет. Сетевые entities пока только предложены в документации.
+User, PlayerProgress, UnlockedCharacter сохранены, включая campaignStage/goldenDoners и совместимый unlock endpoint. Additive migration `20261020000000_party_rooms` создаёт Room, RoomPlayer, MatchRound, TrapPlacement, RoundFinish. Старые migrations не менялись. Multiplayer не пишет в баланс/ownership; room character selection не вызывает profile purchase/select endpoints.
 
 ## Environment
 
@@ -59,6 +65,7 @@ Prisma schema и все migrations **не изменялись**. User, PlayerPr
 | `apps/bot/.env` | `BOT_USERNAME` | username того же бота, без `@` |
 | `apps/api/.env` | `DATABASE_URL` | URL локальной PostgreSQL, например `postgresql://USER:PASSWORD@localhost:5432/doner_game` (подставьте свои значения) |
 | `apps/api/.env` | `BOT_TOKEN` | token **того же** бота, через которого открыт Mini App |
+| `apps/api/.env` | `BOT_USERNAME` | публичное имя существующего бота без `@`, как в bot config; нужно для invite links; без него доступен вход по коду |
 | `apps/api/.env` | `JWT_SECRET` | отдельный случайный секрет, минимум 32 байта |
 | `apps/api/.env` | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` |
 | `apps/api/.env` | `NODE_ENV` | `development` |
@@ -103,17 +110,19 @@ Rate limit хранится в памяти одного процесса, бе�
 
 ## Существующий hosting contract
 
-Production configuration и variables не менялись. Этот этап не выполняет deploy, push, reset или migrations.
+Production configuration и variables не менялись. Deploy/push/reset/production migrations не выполнялись; новая migration проверена только в изолированной локальной тестовой БД.
 
 | Сервис | Сохранённые параметры |
 | --- | --- |
 | Vercel web | Root monorepo; install `pnpm install --frozen-lockfile`; build `pnpm build:web`; output `apps/web/dist`; Node 24; `ENABLE_EXPERIMENTAL_COREPACK=1`; публичный `VITE_API_URL` |
 | Railway API | Root monorepo; build `pnpm install --frozen-lockfile --prod=false && pnpm build:api`; start `pnpm start:api`; health `/health`; 1 replica |
-| Railway environment | DATABASE_URL, BOT_TOKEN, JWT_SECRET, CORS_ORIGINS, NODE_ENV, PORT, TELEGRAM_INIT_DATA_MAX_AGE_SECONDS, TRUST_PROXY_HOPS, RAILPACK_PRUNE_DEPS |
-| Existing migration hook | `pnpm db:deploy` остаётся прежним hosting contract; в Stage 6.0 не запускался |
+| Railway environment | существующие variables сохраняются; добавить публичный BOT_USERNAME для invite links, если его ещё нет |
+| Existing migration hook | `pnpm db:deploy` должен применить additive rooms migration до запуска нового API |
 | BotFather | Main Mini App URL остаётся HTTPS frontend; bot `/start` и `/game` используют startapp=home |
 
-Для реального Telegram нужны доступные по HTTPS web/API и совпадающий CORS origin. Production smoke на телефонах остаётся отдельной ручной проверкой после разрешённого будущего deploy. Текущий браузерный QA использует синтетический Telegram SDK/API, а API integration — только отдельную временную БД.
+Для Telegram нужны HTTPS web/API и точный CORS origin. Socket.IO использует тот же API domain/PORT; нового realtime service нет. Нужен один активный API instance, включая обновления: нет distributed ownership/leader lease. Для обновления после 6.1 остановить прежний API до старта нового, с коротким обслуживанием и безопасным abort активной гонки. Подробнее в [deployment plan](docs/TELEGRAM_MULTIPLAYER_TEST_PLAN.md).
+
+Ручной smoke на двух телефонах остаётся после отдельно разрешённого deployment. Multiplayer browser QA использует fixture Telegram SDK, **настоящие HTTP auth/JWT/Socket.IO/API/PostgreSQL** и двух разных fixture users. Только training browser QA подменяет HTTP ответы.
 
 ## Проверки
 
@@ -135,6 +144,22 @@ pnpm --filter @doner-game/web test:browser
 
 API на 3013 запускать не нужно: browser tests перехватывают запросы fixture-ответами. Если Chromium не установлен, `pnpm --filter @doner-game/web exec playwright install chromium`. При нестандартной папке браузеров задать PLAYWRIGHT_BROWSERS_PATH. Скриншоты: `artifacts/stage-6/`. Для production preview: собрать с fixture VITE_API_URL, поднять `preview --port 4185`, затем задать BROWSER_TEST_URL=http://127.0.0.1:4185 и BROWSER_TEST_PRODUCTION=1.
 
+Real multiplayer QA (другой терминал):
+
+```bash
+# Задайте TEST_DATABASE_URL для отдельной локальной PostgreSQL с именем *_test.
+# Не подставляйте production DATABASE_URL.
+DATABASE_URL="$TEST_DATABASE_URL" pnpm db:deploy
+TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm test
+VITE_API_URL=http://127.0.0.1:3014 pnpm --filter @doner-game/web dev --port 5186
+# Пока Vite работает:
+TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @doner-game/web test:party
+```
+
+Browser script запускает fixture API 3014 через IPC, создаёт двух пользователей и подписанные test initData, затем удаляет свои записи и останавливает API. Fixture требует loopback `*_test` DB, не загружает `.env`; production fake-auth route не создаётся. Не запускайте одновременно два RoomManager/API integration против одной test DB.
+
+Для локальной проверки production frontend: `VITE_API_URL=http://127.0.0.1:3014 pnpm build`, `pnpm --filter @doner-game/web preview --port 4186`, затем `BROWSER_TEST_URL=http://127.0.0.1:4186 BROWSER_TEST_PRODUCTION=1 TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @doner-game/web test:party`. Это локальный preview, не deployment. Screenshots — `artifacts/stage-6.1/`.
+
 ## Архив старого прототипа
 
 Перед очисткой сохранены 136 файлов и git diff/status:
@@ -147,6 +172,6 @@ API на 3013 запускать не нужно: browser tests перехват
 
 ## Ограничения
 
-Один локальный игрок; нет online room, abilities, rewards, магазина, врагов, death/respawn или сохранения карты после выхода. Сложное размещение может перекрыть маршрут вне защищённых зон; глобальный path validation ещё не реализован. Спрайты временные. Phaser загружается лениво при входе в арену; его chunk превышает стандартное предупреждение Vite 500 kB.
+Один активный API instance; сервер проверяет правдоподобность координат, но не симулирует полную physics. Нет latency compensation, распределённого room ownership, load tests, abilities/rewards/магазина/death/respawn. Сложное размещение может перекрыть маршрут; global path validation отсутствует. Спрайты временные. Phaser lazy chunk превышает предупреждение Vite 500 kB.
 
-Следующий этап — общая серверная комната и настоящий BUILD/RACE с друзьями, authoritative finish, reconnect и mobile latency. Stage 6.1 в этой работе не начинался.
+Реальные телефоны/Telegram accounts ещё требуют ручной проверки. Stage 6.2 не начинался.

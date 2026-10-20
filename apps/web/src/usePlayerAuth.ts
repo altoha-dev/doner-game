@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CharacterId, PlayerProfileDto } from '@doner-game/shared';
 import { ApiClientError, createApiClient, getAuthErrorMessage, getCharacterErrorMessage } from './api';
 
@@ -98,5 +98,6 @@ export function usePlayerAuth(initData: string | undefined) {
     }
   }
 
-  return { state, retry: () => setAttempt(value => value + 1), changeCharacter, pendingCharacter, actionError, notice };
+  const socketCredentials = useCallback(() => session.current?.api.socketCredentials() ?? null, []);
+  return { state, socketCredentials, retry: () => setAttempt(value => value + 1), changeCharacter, pendingCharacter, actionError, notice };
 }

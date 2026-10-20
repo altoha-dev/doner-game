@@ -11,6 +11,7 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "@doner-game/shared": "workspace:*",
     "abort-controller": "^3.0.0",
     "grammy": "^1.46.0"
   },

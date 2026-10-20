@@ -5,6 +5,7 @@ import type { CharacterId } from '@doner-game/shared';
 // Original code-native pixel graphics. No downloaded packs or runtime image requests.
 export function createWinterTextures(scene: Phaser.Scene, id: CharacterId, includePlayer = true) {
   const draw = (key: string, w: number, h: number, paint: (g: Phaser.GameObjects.Graphics) => void) => {
+    if (scene.textures.exists(key)) return;
     const g = scene.make.graphics({ x: 0, y: 0 }); paint(g); g.generateTexture(key, w, h); g.destroy();
   };
   draw('snow-rock', 16, 16, g => {
@@ -53,5 +54,5 @@ export function createWinterTextures(scene: Phaser.Scene, id: CharacterId, inclu
     }
   });
   const texture = scene.textures.get(`winter-player-${id}`);
-  for (let frame = 0; frame < 4; frame++) texture.add(frame, 0, frame * 16, 0, 16, 24);
+  for (let frame = 0; frame < 4; frame++) if (!texture.has(String(frame))) texture.add(frame, 0, frame * 16, 0, 16, 24);
 }

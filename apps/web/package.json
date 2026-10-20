@@ -9,13 +9,15 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test test/*.test.ts",
-    "test:browser": "node test/browser/game.mjs"
+    "test:browser": "node test/browser/game.mjs",
+    "test:party": "node test/browser/party.mjs"
   },
   "dependencies": {
     "@doner-game/shared": "workspace:*",
     "phaser": "4.2.1",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "socket.io-client": "4.8.3"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

@@ -102,6 +102,7 @@ export function createApiClient(apiUrl: string | undefined) {
     async selectCharacter(characterId: CharacterId, signal?: AbortSignal): Promise<{ progress: PlayerProgressDto }> {
       return authorized('/me/character', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ characterId }) }, signal);
     },
+    socketCredentials() { return accessToken ? { url: baseUrl, token: accessToken } : null; },
     clear(): void { accessToken = null; },
   };
 }

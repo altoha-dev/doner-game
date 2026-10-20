@@ -82,9 +82,9 @@ export function overlaps(a: Rect, b: Rect): boolean {
 export function snapToGrid(point: Point, grid: number): Point {
   return { x: Math.round(point.x / grid) * grid, y: Math.round(point.y / grid) * grid };
 }
-export function placementError(arena: ArenaDefinition, placements: readonly TrapPlacement[], point: Point): string | null {
+export function placementError(arena: ArenaDefinition, placements: readonly TrapPlacement[], point: Point, limit: number = PARTY_RULES.maxPlacements): string | null {
   if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x % arena.grid || point.y % arena.grid) return 'Нужна позиция на сетке';
-  if (placements.length >= PARTY_RULES.maxPlacements) return 'Достигнут лимит блоков';
+  if (placements.length >= limit) return 'Достигнут лимит блоков';
   const block = { ...point, ...PARTY_RULES.basicPlatform };
   if (arena.protectedAreas.some(area => overlaps(area, block))) return 'Старт и финиш защищены';
   if (!arena.placementAreas.some(a => block.x >= a.x && block.y >= a.y && block.x + block.width <= a.x + a.width && block.y + block.height <= a.y + a.height)) return 'Вне зоны строительства';

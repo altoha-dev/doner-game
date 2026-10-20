@@ -1,74 +1,88 @@
-# Multiplayer architecture — предложение для Stage 6.1+
+# Multiplayer architecture — Stage 6.1
 
-Stage 6.0 не содержит WebSocket server, сетевых rooms, наград или новых Prisma моделей. Это план границы ответственности, а не описание уже работающего multiplayer.
+Описание реализованного **v0.6.1 Real Multiplayer Prototype**. Проверки и оставшийся ручной Telegram smoke — в [отчёте](STAGE_6_1_REPORT.md).
 
-## Текущая граница
+## Transport и identity
 
-`packages/shared/src/party.ts` определяет MatchPhase, ArenaDefinition, TrapPlacement, MatchSnapshot, RoundResult, ArenaCommand, ArenaSession, RoomPlayer/RoomSnapshot, RaceInput/RaceSnapshot, PlacementRequest и будущий ability descriptor. `arena.ts` содержит общую геометрию SNOWY CHAOS с revision. Нельзя выбирать арену по selectedCharacterId.
+`apps/api/src/multiplayer/socket.ts` подключает Socket.IO 4.8.3 к `app.server` до `app.listen`. REST и `/socket.io/` используют один процесс, PORT и существующий API domain. Web использует тот же `VITE_API_URL`, WebSocket с HTTP polling fallback (`tryAllTransports: true`). [Socket.IO client options](https://socket.io/docs/v4/client-options/#tryalltransports).
 
-`GameScreen` связывает UI и `ArenaSession` через useSyncExternalStore. `createLocalSession` — единственная локальная authority: валидирует команды, публикует immutable snapshots, сохраняет placements между раундами. `createGame` получает snapshot и поддерживает applySnapshot, setBuildView, setPaused; создаёт физические объекты и выдаёт локальное событие finish. React не хранит дубликат массива платформ. Physics/lifecycle/input отделены от session.
+Проверенный Telegram initData → существующий `/auth/telegram` → JWT в памяти → `auth: { token }` при Socket.IO handshake. Токен не передаётся в URL, localStorage, sessionStorage или логи. Сервер проверяет подпись HS256, issuer/audience/exp через существующий Fastify JWT plugin, UUID sub и наличие пользователя в БД. Имя, avatar и userId берутся из серверного профиля. `initDataUnsafe.start_param` — только непривилегированная подсказка приглашения. По истечении JWT socket отключается; кнопка повторной авторизации использует прежний auth flow.
 
-Для сети нужен новый session adapter и расширение renderer для remote players и reconciliation. Текущий render adapter умеет добавлять блоки одного локального матча; online adapter должен добавить удаление/полную замену при reconnect или новом match ID. Это запланированное расширение, не уже реализованная синхронизация. Сохранятся сцена, исходная геометрия, ввод, коллизии, tile renderer и lifecycle.
+Действует один socket на пользователя: новое подключение отключает прежнее с понятной ошибкой. Это отдельное правило от unique active membership в БД. Origin проверяется для polling и WebSocket через `allowRequest`; запросы без Origin допускаются для native clients, но требуют JWT.
 
-**FINISH_LOCAL нельзя принимать по сети.** Времена, координаты и finish клиента не являются основанием rewards. Локальная пауза также не должна останавливать сетевой матч.
+Room code — 6 криптографически случайных символов без `I/O/0/1`, unique PostgreSQL index, TTL 2 часа. Это поиск комнаты, не credential. Общий с ботом helper создаёт Main Mini App link: `https://t.me/<BOT_USERNAME>?startapp=room_<CODE>`. Используется публичное имя существующего бота, без выдуманного app short name. После auth пользователь явно подтверждает JOIN. [Telegram Main Mini App](https://core.telegram.org/bots/webapps#launching-the-main-mini-app).
 
-## Комнаты, identity и соединение
+## Контракты и обработка
 
-- Внутренний Room ID — UUID; короткий room code служит поиском и приглашением, не авторизацией. Нужны уникальность, TTL, лимиты попыток и максимум 4 участника.
-- Telegram initData → существующий HTTP auth → JWT → серверный User ID. Identity берётся только из проверенного токена; не из room payload, username или initDataUnsafe.
-- Будущий Mini App deep link передаёт непривилегированный room token/start parameter. Точный формат и поведение повторного приглашения согласовать перед реализацией. Текущий startapp=home остаётся рабочим; старые solo-параметры не открывают Campaign.
-- WebSocket аутентифицируется короткоживущим одноразовым ticket, полученным по защищённому HTTP endpoint. Не помещать долгоживущий JWT в URL/логи. Проверять origin, истечение ticket, membership, размер и форму сообщений, rate limit.
-- Presence: connected / reconnecting / disconnected; heartbeat, last seen, явный выход. Ready привязан к игроку и текущему lobby revision; сервер начинает матч, когда выполнены условия комнаты.
+`packages/shared/src/online.ts` — фактический сетевой контракт; `party.ts` — общая arena/session/placement API и заготовки будущих систем.
 
-## Сервер владеет фазами и картой
+| Направление | Событие | Содержимое |
+| --- | --- | --- |
+| client → server | `room:command` + ack | CREATE, JOIN, RESUME, LEAVE, READY, CHARACTER, START, PLACE, SKIP, NEXT, CLOSE |
+| server → members | `room:snapshot` | полный OnlineRoom с revision, players, MatchSnapshot, placements, finishes |
+| client → server | `race:move` | round, sequence, body center x / feet y, velocityX/Y |
+| server → members | `race:snapshot` | room/round, sequence, serverTime, принятые позиции |
+| server → client | `race:correction` | последняя принятая позиция |
+| server → client | `session:error` | безопасный код и сообщение |
 
-LOBBY → BUILD → RACE → RESULTS → BUILD или MATCH_FINISHED. Сервер хранит phase/round/deadline, выбирает одну arena revision на матч и сериализует изменения одной комнаты. Клиенты только показывают authoritative snapshot.
+Runtime validators запрещают лишние ключи, identity, клиентский finish/rank. Сообщение ≤8 KiB. Лимиты одного процесса: handshake 60/min по адресу, commands 90/min/user, CREATE/JOIN 12/min/user, движение 35/sec/user. За proxy handshake IP может быть общим для нескольких игроков; это ограничение прототипа при большом числе подключений.
 
-PlacementRequest несёт commandId, matchId, round, expectedRevision, catalogId, position. Сервер проверяет phase, membership, идентичность карты, grid/bounds/protected zones/overlaps, количество бесплатных объектов, владение дополнительным объектом, лимит матча. Повтор commandId возвращает прежний результат. Два одновременных placement в одном месте: одно принятие, другому явный отказ и свежая revision. UI не превращает preview в коллизию до ack.
+RoomManager сериализует state commands общей очередью процесса. Перед публикацией snapshot выполняется транзакция с compare-and-swap по предыдущей revision. Ошибка БД не превращается в успешный ack. Socket.IO сохраняет порядок сообщений, но не гарантирует повтор доставки по умолчанию; PLACE имеет commandId, а reconnect запрашивает полный snapshot. Старые команды автоматически не проигрываются. [Socket.IO delivery guarantees](https://socket.io/docs/v4/delivery-guarantees/).
 
-Успешный placement добавляется в единый snapshot комнаты, остаётся в следующих раундах и рассылается всем. Новый матч получает новый ID и пустую изменяемую часть карты. Базовая геометрия не изменяется purchases/character selection.
+## Membership, host, фазы
 
-## Забег и мобильная задержка
+CREATE создаёт LOBBY, capacity 2/3/4 (UI default 4), создатель — host. JOIN допускается в LOBBY со свободным местом. Повторный JOIN текущего участника возвращает существующий seat. Пользователь имеет только одну активную комнату. `altoha`, `aigerim`, `temik` свободны в комнате; ownership/selected character аккаунта не меняются. Смена героя снимает READY.
 
-Предпочтение для MVP — серверная симуляция с фиксированным timestep и обработкой input, а не доверие клиентским координатам. Предварительные значения 30 ticks/s и snapshots 10–20/s требуют измерений на телефонах; это не гарантии производительности. Извлечь/реализовать совместимую headless physics и проверить одинаковые units, body dimensions, collision ordering и movement constants до запуска ranked rewards. Phaser остаётся renderer и локальной prediction.
+```mermaid
+stateDiagram-v2
+  [*] --> LOBBY: CREATE
+  LOBBY --> BUILD: host START, ≥2, все connected + ready
+  BUILD --> RACE: все построили/пропустили или 60 секунд
+  RACE --> RESULTS: все закончили или 90 секунд
+  RESULTS --> BUILD: host NEXT, раунд <5
+  RESULTS --> MATCH_FINISHED: host NEXT после раунда 5
+```
 
-RaceInput: sequence, clientTick, direction -1/0/1, jumpPressed. Сервер ограничивает частоту/диапазоны, отбрасывает повторы и слишком старые/будущие inputs; не принимает ускорение или скорость произвольного клиента. RaceSnapshot: serverTick, player positions/velocities, acknowledged input sequence, finishOrder. Для своего игрока — prediction + reconciliation; для остальных — interpolation с небольшим буфером. Не выполнять тяжёлый rollback на каждом кадре телефона.
+TTL/CLOSE/последний LEAVE закрывают комнату из любой фазы. RESULTS содержит серверный список: места по порядку принятого финиша; DNF/ABORTED без места и времени. Накопленных очков/победителя матча/rewards нет.
 
-Финиш и порядок определяет сервер по пересечению finish в авторитетной симуляции. Clock sync/latency используются для отображения и bounded input buffering, а не права клиента выбирать время финиша. Ничья внутри tick, round timeout, DNF, background/throttling, disconnect и компенсация задержки — открытые решения. Проверки невозможной скорости, прыжка и телепортации дополняют server ownership, не заменяют его.
+## Общий BUILD
 
-## Reconnection и устойчивость
+Один бесплатный BASIC PLATFORM BLOCK 32×16 на участника за раунд либо SKIP. PLACE содержит commandId, round, expectedRevision, position. Проверяются membership/phase/round/revision, личный лимит, grid 16, bounds/protected zones, geometry/block overlaps и максимум 20 блоков. Валидация и запись сериализованы: два запроса не займут одно место.
 
-Reconnect с новой аутентификацией, room ID, match ID и последней revision. Сервер выдаёт полный snapshot: карта + placements + phase + deadline + scores + race state. Старые client commands не проигрываются автоматически. Нужны grace period, seat reservation, policy для второго устройства/вкладки и истёкшей комнаты. При потерянном connection UI очищает удерживаемые кнопки, показывает состояние и не начисляет локальные финиши.
+Повтор принятого commandId с теми же owner/round/coordinates возвращает snapshot без новой записи. Изменённый повтор отклоняется. При устаревшей revision UI сохраняет preview и показывает ошибку; игрок подтверждает актуальное состояние повторно. Физический блок появляется только из server snapshot. NEXT сохраняет блоки. Глобальная проходимость не доказана; timeout завершает непроходимый RACE.
 
-Один room actor/последовательная очередь на комнату в первой версии; стратегия распределения rooms между процессами определяется перед горизонтальным масштабированием. Состояние в памяти нуждается в recovery strategy; завершённые результаты и экономика хранятся транзакционно. Выбор hosted transport/брокера не зафиксирован.
+## Phaser, движение, финиш
 
-## Settlement и fair play
+Один `GameScreen`/`createGame` обслуживает local session и сетевой `ArenaSession` adapter. Geometry, movement constants, input, collisions, camera и lifecycle общие. Body 10×21 у всех; player-player collisions нет. Remote actors — непрозрачные sprites с interpolation и серверным именем до 20 Unicode символов; подписи близких игроков разнесены по высоте.
 
-Сервер рассчитывает результаты после закрытия раунда. Одна транзакция сохраняет результат, ledger и изменение PlayerProgress. Уникальный settlement key (match, round, player, reward kind) предотвращает повторное начисление после retry/reconnect. Баланс не приходит от клиента. Покупка ловушки: проверка цены/баланса/phase → debit ledger → entitlement; расход entitlement при placement также идемпотентен.
+Локальная Arcade physics даёт немедленный отклик. Movement отправляется/рассылается примерно 15 Hz, volatile, без PostgreSQL записи. Сервер хранит accepted sequence/position, суммарный путь, grounded/air history. Проверяет round, порядок пакетов, bounds, скорость/перемещение, путь по серверному времени, swept body against solids, высоту/длительность прыжка. Landing + buffered jump между пакетами учитывается только рядом с достижимой реальной поверхностью.
 
-Локальные training match IDs не допускаются к settlement. Нужно решить минимальный состав матча, DNF/disconnect, tie breaks, anti-farm лимиты и eligibility до включения реальных Doner. Базовый объект бесплатен; дополнительные объекты ограничены и не должны закрывать start/finish. Глобальная проходимость и баланс трёх MVP ловушек требуют отдельной проверки.
+Пересечение **принятого** тела с finish ставит результат в серверную очередь. Rank определяется порядком обработки; равные timestamps получают последовательные места. Клиент не задаёт rank/time и не отправляет FINISH. Результат публикуется после DB commit. Unique room/round/user и room/round/rank защищают от дубликатов.
 
-## Предложение данных — без миграций
+**Это клиентская physics с server plausibility checks, не полная server-authoritative simulation.** Правдоподобный синтетический путь может пройти проверки. Latency влияет на место; компенсации задержки/rollback нет. Долгая задержка может вызвать коррекцию позиции. Для соревновательных наград этого недостаточно; экономика в 6.1 отсутствует.
 
-| Сущность | Назначение и предполагаемые ключи |
+## Reconnect, выход, restart
+
+Heartbeat 10s/timeout 10s; UI показывает reconnect, очищает input и останавливает локальное управление. Серверные часы продолжаются. Reconnect проверяет JWT, сохраняет seat, выдаёт full room snapshot и movement; собственная позиция/sequence восстанавливаются. Refresh проходит auth заново. В sessionStorage хранится только публичный room code для маршрутизации.
+
+Disconnected игрок сохраняет seat до LEAVE/закрытия/TTL. JOIN после старта запрещён. READY сбрасывается при disconnect. После 30s отсутствия host передаётся первому подключённому участнику; если таких нет, остаётся прежним. LEAVE передаёт host сразу, в RACE выходящий получает DNF. Pause/фон не останавливают друзей. Без связи выход только закрывает экран с возможностью вернуться; серверный LEAVE не имитируется.
+
+PostgreSQL сохраняет room/phase/deadlines/players/placements/results. Startup сбрасывает presence/ready. Незавершённый RACE становится RESULTS: принятые FINISHED сохраняются, остальные ABORTED; UI объясняет restart, host может нажать NEXT. BUILD deadline сохраняется; истёкшая комната закрывается. Позиции не сохраняются в БД, поэтому прежняя гонка после restart не продолжается.
+
+## Данные и эксплуатация
+
+Additive migration `20261020000000_party_rooms`:
+
+| Model | Ключи и назначение |
 | --- | --- |
-| Room | UUID, unique code, ownerUserId, status, expiresAt |
-| RoomPlayer | roomId + userId unique, characterId, ready, presence, joinedAt |
-| Match | roomId, arenaId/revision, rulesVersion, status, startedAt, finishedAt |
-| MatchRound | matchId + roundNumber unique, phase, deadlines, simulation seed/version |
-| TrapCatalogItem | stable ID, type, price, dimensions, limits, enabled, version |
-| TrapPlacement | matchId, originatingRound, ownerUserId, catalogVersion, grid x/y, commandId unique |
-| MatchResult | match/round/user unique, server finish rank/time, status, points, settlement status |
-| DonerTransaction | userId, signed amount, kind, settlement/purchase key unique, match/round refs, timestamp |
+| Room | UUID, unique code, host/capacity/phase/round/revision/deadlines/TTL |
+| RoomPlayer | PK room/user, nullable unique activeUserId, room character/ready/presence/seat/buildDone |
+| MatchRound | PK room/round, phase, startedAt/endedAt |
+| TrapPlacement | commandId PK, unique room/round/user, type/grid coordinates |
+| RoundFinish | PK room/round/user, unique room/round/rank, status/server time |
 
-User, PlayerProgress, UnlockedCharacter и существующие migrations сохраняются. Не удалять старый campaignStage или переписывать Telegram IDs ради новой концепции. Новые связи/индексы и их additive migration проектируются только перед реализацией хранилища; никаких schema changes Stage 6.0.
+Room = один match, matchId = roomId; отдельный Match не требуется. User/PlayerProgress/UnlockedCharacter и старые migrations сохранены. Multiplayer store не пишет в PlayerProgress. Profile/unlock endpoints остаются совместимыми, lobby их не вызывает.
 
-## Stage 6.1: следующий небольшой вертикальный срез
+**Только один активный API instance, включая обновления.** Нет Redis adapter, распределённого ownership или leader lease. CAS защищает запись, но не координирует два сервера. При обновлении после 6.1 остановить прежний instance до старта нового, допустить короткое обслуживание и безопасный abort гонки. Railway rolling overlap сам по себе не решает эту задачу. [Railway deployment teardown](https://docs.railway.com/deployments/deployment-teardown).
 
-1. Утвердить room lifecycle, DNF/ties/disconnect, race authority и local-to-network transport contract.
-2. Реализовать auth connection, создание/join комнаты, invite, presence и ready для 2–4 реальных Telegram пользователей.
-3. Передавать одну arena revision и общий BUILD с server validation + command idempotency.
-4. Синхронизировать RACE, других игроков и finish, добавить reconnect и измерить mobile latency.
-5. Показывать одинаковый следующий раунд с сохранёнными блоками. Реальную экономику включать отдельным шагом после корректного settlement и anti-farm правил.
-
-Stage 6.1 и production deployment в текущей работе не выполнялись.
+Completed rows сохраняются, автоматической retention policy нет. Общая очередь и state DB writes ограничивают масштаб. Deadline UI использует часы телефона; серверный deadline остаётся authority. Перед масштабированием нужны ownership/leases, retention, нагрузочные/latency проверки и полноценная симуляция при введении rewards.

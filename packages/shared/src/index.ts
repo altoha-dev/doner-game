@@ -40,3 +40,5 @@ export interface AuthResponseDto extends PlayerProfileDto {
 export interface ApiErrorDto {
   error: { code: string; message: string };
 }
+
+export * from './online.js';

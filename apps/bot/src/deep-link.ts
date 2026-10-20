@@ -1,3 +1,4 @@
+import { buildMiniAppLink } from '@doner-game/shared';
 import { getBotUsername } from './config.js';
 
 export function getMiniAppDeepLink(startParam = 'home'): string {
@@ -5,7 +6,5 @@ export function getMiniAppDeepLink(startParam = 'home'): string {
     throw new Error('startParam должен содержать 1–512 символов: A–Z, a–z, 0–9, _ или -.');
   }
 
-  const url = new URL(`https://t.me/${getBotUsername()}`);
-  url.searchParams.set('startapp', startParam);
-  return url.toString();
+  return buildMiniAppLink(getBotUsername(), startParam);
 }

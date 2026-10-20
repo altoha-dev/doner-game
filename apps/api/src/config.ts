@@ -8,6 +8,7 @@ export interface ApiConfig {
   port: number;
   databaseUrl: string;
   botToken: string;
+  botUsername?: string;
   jwtSecret: string;
   corsOrigins: string[];
   telegramMaxAgeSeconds: number;
@@ -63,7 +64,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): ApiConfig {
     throw new ConfigurationError('CORS_ORIGINS: нужны origins через запятую, без путей, завершающего / и wildcard.');
   }
 
+  const botUsername = env.BOT_USERNAME?.trim().replace(/^@/, '');
+  if (botUsername && !/^[a-zA-Z0-9_]{5,32}$/.test(botUsername)) throw new ConfigurationError('Некорректный BOT_USERNAME.');
+
   return {
+    ...(botUsername ? { botUsername } : {}),
     nodeEnv: nodeEnv as ApiConfig['nodeEnv'],
     port: integer('PORT', 3001, 1, 65535),
     databaseUrl,
