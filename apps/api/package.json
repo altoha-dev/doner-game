@@ -9,6 +9,7 @@
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
     "test": "prisma generate && node --import tsx --test test/*.test.ts",
+    "test:network-bench": "node --import tsx test/network-physics.bench.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy"

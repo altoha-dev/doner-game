@@ -82,7 +82,7 @@ test('real Socket.IO + PostgreSQL shared match, authorization, recovery and unch
     A.emit('race:move', { round: 1, sequence: 1, x: 1080, y: 272, velocityX: 100, velocityY: 0 });
     await sleep(100); assert.equal((await ok(A, { type: 'RESUME' })).finishes.length, 0);
     let received = false; B.on('race:snapshot', s => { if (s.players.some(p => p.playerId === a.user.id && p.x > 48)) received = true; });
-    A.emit('race:input', { round: 1, sequence: 2, direction: 1, jump: 0 }); await until(() => received);
+    A.emit('race:input', { round: 1, frames: [{ sequence: 2, direction: 1, jump: 0 }] }); await until(() => received);
   });
   await t.test('authoritative input simulation reaches finish in server order, with no duplicate results', async () => {
     const states = [{ socket: A, sequence: 10, jump: 0, delay: 0 }, { socket: B, sequence: 10, jump: 0, delay: 1800 }];
@@ -92,7 +92,7 @@ test('real Socket.IO + PostgreSQL shared match, authorization, recovery and unch
       for (const p of states) {
         const running = Date.now() - began >= p.delay;
         if (running && iteration % 8 === 0) p.jump++;
-        p.socket.emit('race:input', { round: 1, sequence: ++p.sequence, direction: running ? 1 : 0, jump: p.jump });
+        p.socket.emit('race:input', { round: 1, frames: Array.from({ length: 3 }, () => ({ sequence: ++p.sequence, direction: running ? 1 as const : 0 as const, jump: p.jump })) });
       }
       iteration++; await sleep(50);
     }
@@ -163,7 +163,10 @@ test('Stage 6.1.5 real clients: previews, authoritative body contacts, head jump
   const controls = new Map<string, { socket: Client; sequence: number; direction: -1 | 0 | 1; jump: number; silent: boolean }>();
   let round = 1;
   const heartbeat = setInterval(() => {
-    for (const control of controls.values()) if (control.socket.connected && !control.silent) control.socket.emit('race:input', { round, sequence: ++control.sequence, direction: control.direction, jump: control.jump });
+    for (const control of controls.values()) {
+      const frames = Array.from({ length: 3 }, () => ({ sequence: ++control.sequence, direction: control.direction, jump: control.jump }));
+      if (control.socket.connected && !control.silent) control.socket.emit('race:input', { round, frames });
+    }
   }, 50);
   t.after(async () => { clearInterval(heartbeat); clients.forEach(c => c.disconnect()); await app.close(); await db.room.deleteMany({ where: { id: { in: roomIds } } }); await db.user.deleteMany({ where: { id: { in: ids } } }); await db.$disconnect(); });
   async function login(index: number) {
@@ -293,7 +296,7 @@ test('Stage 6.1.5 real clients: previews, authoritative body contacts, head jump
   await t.test('missing input expires, old input is ignored, and RACE reconnect restores the same physical players', async () => {
     controls.get(a.user.id)!.silent = true; await sleep(450);
     assert.equal(state(a.user.id).active, false);
-    A.emit('race:input', { round: 1, sequence: 1, direction: 1, jump: 0 });
+    A.emit('race:input', { round: 1, frames: [{ sequence: 1, direction: 1, jump: 0 }] });
     controls.get(a.user.id)!.silent = false; await until(() => state(a.user.id).active);
     B.disconnect(); await until(() => !state(b.user.id).active);
     B = await connect(b); room = await ok(B, { type: 'RESUME' });

@@ -7,8 +7,9 @@ export const PLAYER_PHYSICS = {
   gravity: 660, jump: 224, maxFall: 420, coyoteMs: 80, bufferMs: 100,
   pushSpeed: 36, pushShare: .75, headJumpBonus: 12, tolerance: .001, headTolerance: 2, solverPasses: 24,
   tickHz: 60, snapshotHz: 15, inputHz: 20, inputTimeoutMs: 300,
-  maxCatchupSteps: 6, maxPredictionSteps: 12, interpolationMs: 1000 / 15,
-  correctionSnapDistance: 32, correctionDecay: .65, impactCooldownMs: 220,
+  maxCatchupSteps: 6, maxPredictionSteps: 24, inputPacketSteps: 6, remotePredictionSteps: 12,
+  interpolationMs: 1000 / 15, interpolationMinMs: 100, interpolationMaxMs: 200, extrapolationMs: 1000 / 15,
+  correctionSnapDistance: 32, renderMaxOffset: 6, correctionMs: 80, impactCooldownMs: 220,
 } as const;
 
 export interface PlayerControls { sequence: number; direction: -1 | 0 | 1; jump: number }
@@ -58,6 +59,7 @@ export function stepPlayers(players: PhysicsPlayer[], controls: ReadonlyMap<stri
   const ordered = [...players].sort((a, b) => a.seat - b.seat || (a.playerId < b.playerId ? -1 : 1));
   const before = new Map(ordered.map(p => [p.playerId, { ...p }]));
   const jumped = new Set<string>(), impacts: PlayerImpact[] = [];
+  const carriedX = new Map<string, number>();
   for (const p of ordered) {
     if (p.finished) continue;
     const input = p.active ? controls.get(p.playerId) : undefined;
@@ -72,6 +74,8 @@ export function stepPlayers(players: PhysicsPlayer[], controls: ReadonlyMap<stri
       if (p.supportId) impacts.push({ kind: 'head-jump', a: p.playerId, b: p.supportId, x: p.x, y: p.y });
       p.jumpBufferTicks = 0; p.coyoteTicks = 0; jumped.add(p.playerId);
     } else p.jumpBufferTicks = Math.max(0, p.jumpBufferTicks - 1);
+    // A rider's vertical motion is relative to its support; carry supplies world displacement.
+    if (!jumped.has(p.playerId) && p.supportId && before.get(p.supportId)?.active && !before.get(p.supportId)?.finished) p.velocityY = 0;
     p.grounded = false; p.supportId = null;
     p.velocityX = toward(p.velocityX, p.direction * cfg.speed, (p.direction ? cfg.acceleration : cfg.drag) * dt);
     const dx = p.velocityX * dt;
@@ -86,55 +90,74 @@ export function stepPlayers(players: PhysicsPlayer[], controls: ReadonlyMap<stri
     const support = ordered.find(s => s.playerId === previous.supportId && s.active && !s.finished);
     const oldSupport = support && before.get(support.playerId)!;
     if (support && oldSupport) {
-      moveX(p, support.x - oldSupport.x, solids, width);
+      carriedX.set(p.playerId, moveX(p, support.x - oldSupport.x, solids, width));
       const y = p.y + support.y - oldSupport.y;
       if (free(p.x, y, solids, width, height)) p.y = y;
     }
   }
-  // Bounded iterative solver handles stacks/chains of up to four players in stable seat order.
-  for (let pass = 0; pass < cfg.solverPasses; pass++) {
-    let contact = false;
-    for (let i = 0; i < ordered.length; i++) for (let j = i + 1; j < ordered.length; j++) {
-      const a = ordered[i]!, b = ordered[j]!;
-      if (!a.active || !b.active || a.finished || b.finished) continue;
-      const horizontal = cfg.width - Math.abs(a.x - b.x);
-      const vertical = Math.min(a.y, b.y) - Math.max(a.y - cfg.height, b.y - cfg.height);
-      if (horizontal <= eps || vertical <= eps) continue;
-      contact = true;
-      const oldA = before.get(a.playerId)!, oldB = before.get(b.playerId)!;
-      const upper = oldA.y <= oldB.y - cfg.height + cfg.headTolerance ? a : oldB.y <= oldA.y - cfg.height + cfg.headTolerance ? b : null;
-      if (upper) {
-        const lower = upper === a ? b : a, target = lower.y - cfg.height;
-        if (free(upper.x, target, solids, width, height)) {
-          upper.y = target; upper.velocityY = lower.velocityY; upper.grounded = true; upper.supportId = lower.playerId;
-          if (pass === 0 && before.get(upper.playerId)!.supportId !== lower.playerId) impacts.push({ kind: 'head', a: upper.playerId, b: lower.playerId, x: upper.x, y: upper.y });
-          continue;
+  function settle(emit: boolean) {
+    // Bounded iterative solver handles stacks/chains of up to four players in stable seat order.
+    for (let pass = 0; pass < cfg.solverPasses; pass++) {
+      let contact = false;
+      for (let i = 0; i < ordered.length; i++) for (let j = i + 1; j < ordered.length; j++) {
+        const a = ordered[i]!, b = ordered[j]!;
+        if (!a.active || !b.active || a.finished || b.finished) continue;
+        const horizontal = cfg.width - Math.abs(a.x - b.x);
+        const vertical = Math.min(a.y, b.y) - Math.max(a.y - cfg.height, b.y - cfg.height);
+        if (horizontal <= eps || vertical <= eps) continue;
+        contact = true;
+        const oldA = before.get(a.playerId)!, oldB = before.get(b.playerId)!;
+        const upper = oldA.y <= oldB.y - cfg.height + cfg.headTolerance ? a : oldB.y <= oldA.y - cfg.height + cfg.headTolerance ? b : null;
+        if (upper) {
+          const lower = upper === a ? b : a, target = lower.y - cfg.height;
+          if (free(upper.x, target, solids, width, height)) {
+            upper.y = target; upper.velocityY = lower.velocityY; upper.grounded = true; upper.supportId = lower.playerId;
+            if (emit && pass === 0 && before.get(upper.playerId)!.supportId !== lower.playerId) impacts.push({ kind: 'head', a: upper.playerId, b: lower.playerId, x: upper.x, y: upper.y });
+            continue;
+          }
+          // A stack cannot be driven into a ceiling: stop the lower player's ascent.
+          const lowerY = upper.y + cfg.height;
+          if (free(lower.x, lowerY, solids, width, height)) { lower.y = lowerY; lower.velocityY = Math.max(0, lower.velocityY); continue; }
         }
-        // A stack cannot be driven into a ceiling: stop the lower player's ascent.
-        const lowerY = upper.y + cfg.height;
-        if (free(lower.x, lowerY, solids, width, height)) { lower.y = lowerY; lower.velocityY = Math.max(0, lower.velocityY); continue; }
+        const left = a.x < b.x || (a.x === b.x && a.seat < b.seat) ? a : b, right = left === a ? b : a;
+        const leftPushes = left.direction > 0 && right.direction >= 0;
+        const rightPushes = right.direction < 0 && left.direction <= 0;
+        let rightShare = horizontal / 2;
+        if (leftPushes) {
+          const travelled = Math.max(0, right.x - before.get(right.playerId)!.x);
+          rightShare = Math.min(horizontal * cfg.pushShare, Math.max(0, cfg.pushSpeed * dt - travelled));
+        } else if (rightPushes) {
+          const travelled = Math.max(0, before.get(left.playerId)!.x - left.x);
+          rightShare = horizontal - Math.min(horizontal * cfg.pushShare, Math.max(0, cfg.pushSpeed * dt - travelled));
+        }
+        const rightMoved = moveX(right, rightShare, solids, width);
+        const leftMoved = -moveX(left, -(horizontal - rightMoved), solids, width);
+        const remainder = horizontal - rightMoved - leftMoved;
+        if (remainder > eps) moveX(right, remainder, solids, width);
+        if (emit && pass === 0 && (leftPushes || rightPushes)) impacts.push({ kind: 'push', a: leftPushes ? left.playerId : right.playerId, b: leftPushes ? right.playerId : left.playerId, x: (left.x + right.x) / 2, y: Math.min(left.y, right.y) - cfg.height / 2 });
+        if (leftPushes) { right.velocityX = Math.max(right.velocityX, Math.min(cfg.pushSpeed, rightMoved / dt)); left.velocityX = Math.min(left.velocityX, Math.max(0, (left.x - before.get(left.playerId)!.x) / dt)); }
+        else if (rightPushes) { left.velocityX = Math.min(left.velocityX, -Math.min(cfg.pushSpeed, leftMoved / dt)); right.velocityX = Math.max(right.velocityX, Math.min(0, (right.x - before.get(right.playerId)!.x) / dt)); }
+        else { left.velocityX = Math.min(0, left.velocityX); right.velocityX = Math.max(0, right.velocityX); }
       }
-      const left = a.x < b.x || (a.x === b.x && a.seat < b.seat) ? a : b, right = left === a ? b : a;
-      const leftPushes = left.direction > 0 && right.direction >= 0;
-      const rightPushes = right.direction < 0 && left.direction <= 0;
-      let rightShare = horizontal / 2;
-      if (leftPushes) {
-        const travelled = Math.max(0, right.x - before.get(right.playerId)!.x);
-        rightShare = Math.min(horizontal * cfg.pushShare, Math.max(0, cfg.pushSpeed * dt - travelled));
-      } else if (rightPushes) {
-        const travelled = Math.max(0, before.get(left.playerId)!.x - left.x);
-        rightShare = horizontal - Math.min(horizontal * cfg.pushShare, Math.max(0, cfg.pushSpeed * dt - travelled));
-      }
-      const rightMoved = moveX(right, rightShare, solids, width);
-      const leftMoved = -moveX(left, -(horizontal - rightMoved), solids, width);
-      const remainder = horizontal - rightMoved - leftMoved;
-      if (remainder > eps) moveX(right, remainder, solids, width);
-      if (pass === 0 && (leftPushes || rightPushes)) impacts.push({ kind: 'push', a: leftPushes ? left.playerId : right.playerId, b: leftPushes ? right.playerId : left.playerId, x: (left.x + right.x) / 2, y: Math.min(left.y, right.y) - cfg.height / 2 });
-      if (leftPushes) { right.velocityX = Math.max(right.velocityX, Math.min(cfg.pushSpeed, rightMoved / dt)); left.velocityX = Math.min(left.velocityX, Math.max(0, (left.x - before.get(left.playerId)!.x) / dt)); }
-      else if (rightPushes) { left.velocityX = Math.min(left.velocityX, -Math.min(cfg.pushSpeed, leftMoved / dt)); right.velocityX = Math.max(right.velocityX, Math.min(0, (right.x - before.get(right.playerId)!.x) / dt)); }
-      else { left.velocityX = Math.min(0, left.velocityX); right.velocityX = Math.max(0, right.velocityX); }
+      if (!contact) break;
     }
-    if (!contact) break;
   }
+  settle(true);
+  // Pair resolution may move a support again (push/wall). Propagate that final delta
+  // bottom-up, once, including stacks whose seats are not vertically ordered.
+  const carried = new Set<string>();
+  function carryFinal(p: PhysicsPlayer) {
+    if (carried.has(p.playerId)) return;
+    carried.add(p.playerId);
+    const previous = before.get(p.playerId)!;
+    if (!previous.supportId || jumped.has(p.playerId) || !p.active || p.finished) return;
+    const support = ordered.find(s => s.playerId === previous.supportId && s.active && !s.finished);
+    if (!support) return;
+    carryFinal(support);
+    const remaining = support.x - before.get(support.playerId)!.x - (carriedX.get(p.playerId) ?? 0);
+    if (Math.abs(remaining) > eps) moveX(p, remaining, solids, width);
+  }
+  for (const p of ordered) carryFinal(p);
+  settle(false);
   return impacts;
 }

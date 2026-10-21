@@ -11,7 +11,8 @@
     "test": "node --test test/*.test.ts",
     "test:browser": "node test/browser/game.mjs",
     "test:party": "node test/browser/party.mjs",
-    "test:interactions": "node test/browser/interactions.mjs"
+    "test:interactions": "node test/browser/interactions.mjs",
+    "test:network": "node test/browser/network.mjs"
   },
   "dependencies": {
     "@doner-game/shared": "workspace:*",

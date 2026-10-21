@@ -1,5 +1,7 @@
 import { createPhysicsPlayer, PLAYER_PHYSICS, SNOWY_CHAOS, stepPlayers } from '@doner-game/shared';
-import type { NetworkImpact, NetworkPlayer, OnlinePlayer, PlayerControls, RaceControls, Rect } from '@doner-game/shared';
+import type { NetworkImpact, NetworkPlayer, OnlinePlayer, PlayerControls, RaceInputBatch, Rect } from '@doner-game/shared';
+
+type InputStream = { frames: Map<number, PlayerControls>; received: number; at: number; held: PlayerControls };
 
 /** Ephemeral authoritative world: fixed ticks, bounded input, no SQL or client coordinates. */
 export class RaceSimulation {
@@ -7,7 +9,7 @@ export class RaceSimulation {
   tick = 0;
   private accumulator = 0;
   private lastAt: number;
-  private inputs = new Map<string, { value: RaceControls; at: number }>();
+  private inputs = new Map<string, InputStream>();
   private connected = new Set<string>();
   private effects: NetworkImpact[] = [];
   private impactAt = new Map<string, number>();
@@ -19,11 +21,28 @@ export class RaceSimulation {
       return { ...createPhysicsPlayer(p.playerId, p.seat, spawn.x, spawn.y), active: false, round };
     });
   }
-  input(userId: string, value: RaceControls, now: number) {
+  input(userId: string, value: RaceInputBatch, now: number) {
     const player = this.players.find(p => p.playerId === userId);
-    if (!player || !this.connected.has(userId) || player.finished || value.round !== this.round ||
-      value.sequence <= Math.max(player.sequence, this.inputs.get(userId)?.value.sequence ?? 0)) return;
-    this.inputs.set(userId, { value, at: now });
+    if (!player || !this.connected.has(userId) || player.finished || value.round !== this.round || !value.frames.length) return;
+    const latest = value.frames.at(-1)!;
+    const fresh = value.frames.filter(frame => frame.sequence > player.sequence);
+    let stream = this.inputs.get(userId);
+    if (!stream) {
+      if (!fresh.length) return;
+      // Establish this connection's frame origin; no extra simulation is performed.
+      player.sequence = fresh[0]!.sequence - 1;
+      stream = { frames: new Map(), received: player.sequence, at: now,
+        held: { sequence: player.sequence, direction: 0, jump: player.jumpSerial } };
+      this.inputs.set(userId, stream);
+    }
+    if (latest.sequence > player.sequence + PLAYER_PHYSICS.maxPredictionSteps) return;
+    for (const frame of fresh) if (!stream.frames.has(frame.sequence)) stream.frames.set(frame.sequence, { ...frame });
+    if (latest.sequence > stream.received) {
+      stream.received = latest.sequence; stream.at = now;
+      // A late but new command still proves liveness. Preserve its edge/intent for
+      // the next tick; never rewind the consumed frame clock or replay movement twice.
+      if (latest.sequence <= player.sequence) stream.held = { ...latest, sequence: player.sequence, jump: Math.max(latest.jump, player.jumpSerial) };
+    }
   }
   presence(userId: string, connected: boolean) {
     if (connected) this.connected.add(userId); else this.connected.delete(userId);
@@ -44,9 +63,14 @@ export class RaceSimulation {
       this.accumulator -= stepMs; this.tick++;
       const controls = new Map<string, PlayerControls>();
       for (const player of this.players) {
-        const received = this.inputs.get(player.playerId);
-        player.active = this.connected.has(player.playerId) && Boolean(received && now - received.at <= PLAYER_PHYSICS.inputTimeoutMs) && !player.finished;
-        if (player.active && received) controls.set(player.playerId, received.value);
+        const stream = this.inputs.get(player.playerId);
+        player.active = this.connected.has(player.playerId) && Boolean(stream && now - stream.at <= PLAYER_PHYSICS.inputTimeoutMs) && !player.finished;
+        if (player.active && stream) {
+          const sequence = player.sequence + 1;
+          const frame = stream.frames.get(sequence) ?? { ...stream.held, sequence };
+          controls.set(player.playerId, frame); stream.held = frame;
+          for (const key of stream.frames.keys()) if (key <= sequence) stream.frames.delete(key);
+        }
       }
       for (const impact of stepPlayers(this.players, controls, this.solids, SNOWY_CHAOS.width, SNOWY_CHAOS.height)) {
         const key = `${impact.kind}:${impact.a}:${impact.b}`;

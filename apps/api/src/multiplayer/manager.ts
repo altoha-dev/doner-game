@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { buildMiniAppLink, getCharacter, ONLINE_RULES, placementError, PLAYER_PHYSICS, SNOWY_CHAOS } from '@doner-game/shared';
-import type { BuildPreviewInput, MatchPhase, MovementSnapshot, OnlinePlayer, OnlineRoom, PlayerProfileDto, PreviewSnapshot, RaceControls, RoomCommand } from '@doner-game/shared';
+import type { BuildPreviewInput, MatchPhase, MovementSnapshot, OnlinePlayer, OnlineRoom, PlayerProfileDto, PreviewSnapshot, RaceInputBatch, RoomCommand } from '@doner-game/shared';
 import type { RoomStore } from './store.js';
 import { displayName } from './store.js';
 import { atFinish } from './movement.js';
@@ -174,7 +174,7 @@ export class RoomManager {
       if (changed) await this.commit(room);
     }
   }
-  input(userId: string, value: RaceControls) {
+  input(userId: string, value: RaceInputBatch) {
     const room = this.forUser(userId);
     if (room?.match.phase === 'RACE') this.races.get(room.roomId)?.input(userId, value, Date.now());
   }

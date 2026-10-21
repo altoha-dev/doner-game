@@ -1,6 +1,6 @@
-# Multiplayer architecture — Stage 6.1.5
+# Multiplayer architecture — Stage 6.1.6
 
-Описание **v0.6.1.5 Player Interactions + Ayazhan**. Проверки и ручной Telegram smoke — в [отчёте](STAGE_6_1_5_REPORT.md).
+Описание **v0.6.1.6 Network Physics Smoothing**. Проверки и ручной Telegram smoke — в [отчёте](STAGE_6_1_6_REPORT.md).
 
 ## Transport и identity
 
@@ -20,7 +20,8 @@ Room code — 6 криптографически случайных символ
 | --- | --- | --- |
 | client → server | `room:command` + ack | CREATE, JOIN, RESUME, LEAVE, READY, CHARACTER, START, PLACE, SKIP, NEXT, CLOSE |
 | server → members | `room:snapshot` | полный OnlineRoom с revision, players, MatchSnapshot, placements, finishes |
-| client → server | `race:input` | round, sequence, direction −1/0/1, monotonic jump counter |
+| client → server | `race:input` | round, frames[1..6]: sequence, direction −1/0/1, monotonic jump counter |
+| DEV client → server | `net:ping` + ack | без payload, authenticated/rate-limited, клиент измеряет RTT |
 | server → members | `race:snapshot` | room/round, sequence, serverTime/tick, authoritative players + contact impacts |
 | client → server | `build:preview` | round, sequence, basic-platform, position или null для отмены |
 | server → members | `build:previews` | текущие previews с trusted owner/seat/name, validity/reason и expiry |
@@ -60,11 +61,15 @@ Ghost: полупрозрачная заливка цвета seat, рамка �
 
 Один `GameScreen`/`createGame` обслуживает local session и сетевой `ArenaSession` adapter. Training сохраняет Arcade physics; online Arcade world приостановлен и отображает общий solver из `packages/shared/src/physics.ts`. Body 10×21 и все параметры `PLAYER_PHYSICS` одинаковы для четырёх персонажей. Remote actors — непрозрачные sprites с именем из профиля до 20 Unicode символов; близкие подписи разнесены по высоте.
 
-`race.ts` симулирует мир фиксированными шагами 60 Hz, максимум 6 catch-up steps. Клиент посылает только input примерно 20 Hz; сервер публикует snapshots примерно 15 Hz. Sequence/round проверяются, jump — edge counter, время клиента не управляет симуляцией. Input старше 300ms отключает контактное тело до новых команд, но gravity остаётся. Позиции и previews не записываются в SQL.
+`race.ts` симулирует мир фиксированными шагами 60 Hz, максимум 6 catch-up steps. Один input sequence обозначает один physics step. Клиент сохраняет frame history и отправляет хвост до 6 команд примерно 20 Hz (повтор последних команд покрывает краткий пропуск отправки). Частоты input/snapshots не увеличены; input payload теперь содержит несколько frames вместо одного. Валидатор проверяет contiguous sequences, monotonic jump counter, round, bounds и отсутствие чужих полей. Сервер потребляет один frame за tick, дедуплицирует очередь и подтверждает обработанный frame clock в NetworkPlayer.sequence. Пропущенный frame использует последнее намерение; поздняя новая команда обновляет liveness/edge, но не прокручивает мир назад и не добавляет шагов. Будущая очередь ограничена 24 steps. Input старше 300ms отключает контактное тело до новых команд, gravity остаётся. Позиции и previews не записываются в SQL. Snapshots публикуются примерно 15 Hz.
 
-Solver выполняет swept AABB движение по неподвижным платформам и границам, затем до 24 итераций разрешения пар в стабильном seat order с ранним выходом. Встречные тела сопротивляются; push ограничен 36px/s для стоящего получателя, движение ограничивает стена, импульсы не суммируются. Приземление сверху назначает supportId; стоящий на голове переносится движением опоры и может прыгнуть с добавкой 12px/s к jump=224. Потолок останавливает подъём, отсутствующее/finished тело больше не служит опорой. Скорость 100, gravity 660, max fall 420, coyote 80ms, buffer 100ms.
+Solver выполняет swept AABB движение по неподвижным платформам и границам, затем до 24 итераций разрешения пар в стабильном seat order с ранним выходом. Встречные тела сопротивляются; push ограничен 36px/s для стоящего получателя, движение ограничивает стена, импульсы не суммируются. Приземление сверху назначает supportId; стоящий на голове переносится движением опоры и может прыгнуть с добавкой 12px/s к jump=224. Перенос по Y применяется один раз, без повторного интегрирования скорости опоры; X переносится после окончательного push/wall resolution, снизу вверх по stack. Дополнительный bounded settle сохраняет контакты. Потолок останавливает подъём, отсутствующее/finished тело больше не служит опорой. Скорость 100, gravity 660, max fall 420, coyote 80ms, buffer 100ms.
 
-Клиент `RacePrediction` запускает тот же solver, хранит до 12 pending steps, применяет authoritative state и replay ещё не подтверждённых inputs. Небольшие ошибки плавно затухают, большие (>32px), reconnect и контактные коррекции применяются сразу. Далёкие actors интерполируются примерно за 67ms; ближайшие контакты используют общий predicted world, чтобы локальный и remote sprite не рисовались внутри друг друга. Server impact IDs дедуплицируются; маленький pixel burst живёт 180ms и отключён при reduced motion.
+Клиент `RacePrediction` запускает тот же solver, хранит до 24 pending steps, применяет полный authoritative state (включая supportId/grounded/velocity/jump/coyote state) и replay только ещё не подтверждённых inputs. Remote intent предсказывается максимум 12 steps/200ms, затем направление нейтральное; gravity и контакты продолжаются. Reconnect и исчерпание истории сбрасывают replay. Guards проверяют room/round/sequence/tick; старые snapshots не заменяют новые.
+
+`RacePresentation` не изменяет физические тела. Небольшая visual correction затухает по elapsed time (80ms, независимо от FPS), offset ограничен 6px и геометрией. Контактная группа имеет общий offset, сохраняя head gap и не проходя сквозь стену. Ошибка >32px/reconnect/reset не прячется в длинном visual drift. Camera следует rendered sprite. Далёкие actors используют timestamp buffer с jitter-adjusted delay 100–200 ms и extrapolation ≤66.7ms через shared solver; presentation clock не откатывается назад. При приближении к контакту вес плавно переходит к predicted world. Server impact IDs дедуплицируются; прежний pixel burst живёт 180ms и отключён при reduced motion.
+
+DEV `?netdebug=1` показывает RTT, arrival jitter, server tick, snapshot rate, величину reconciliation correction, corrections/sec (>0.25px), largest correction, stale count, **оценку** пропущенных snapshots по tick gaps и FPS. Error измеряется между predicted state до и после authoritative+replay, а не между позициями на разных временных шкалах. Ping один раз в 2s; production не создаёт overlay/ping/DOM metrics. Таймеры и overlay очищаются при выходе. Только числовая статистика, без identity/token/URL. Одиночная коррекция верхнего игрока при неизвестном заранее прыжке опоры остаётся: в браузерах 16–26px при RTT 80–150ms; offset не расширяется ради её маскировки.
 
 Пересечение **серверного** тела с finish ставит результат в существующую очередь. Rank определяется порядком обнаружения серверной симуляцией, в одном обновлении — стабильным seat order. Клиент не задаёт rank/time и не отправляет FINISH. Результат публикуется после DB commit. Unique room/round/user и room/round/rank защищают от дубликатов. При LEAVE физическое тело удаляется только после успешного commit, ошибка записи сохраняет прежнее membership/body до retry.
 
@@ -94,4 +99,4 @@ Room = один match, matchId = roomId; отдельный Match не треб�
 
 **Только один активный API instance, включая обновления.** Нет Redis adapter, распределённого ownership или leader lease. CAS защищает запись, но не координирует два сервера. При обновлении после 6.1 остановить прежний instance до старта нового, допустить короткое обслуживание и безопасный abort гонки. Railway rolling overlap сам по себе не решает эту задачу. [Railway deployment teardown](https://docs.railway.com/deployments/deployment-teardown).
 
-Completed rows сохраняются, автоматической retention policy нет. Общая очередь и lifecycle DB writes ограничивают масштаб. Deadline UI использует часы телефона; серверный deadline остаётся authority. Перед масштабированием нужны ownership/leases, retention, нагрузочные/latency проверки. Протокол движения 6.1.5 несовместим со старым клиентом 6.1: API/frontend обновлять согласованно с reload открытых Mini Apps. Новых env/migrations в 6.1.5 нет.
+Completed rows сохраняются, автоматической retention policy нет. Общая очередь и lifecycle DB writes ограничивают масштаб. Deadline UI использует часы телефона; серверный deadline остаётся authority. Перед масштабированием нужны ownership/leases, retention, нагрузочные/latency проверки. Пакетный протокол движения 6.1.6 несовместим с клиентом 6.1.5 и старше: API/frontend обновлять согласованно с reload открытых Mini Apps. Новых env/migrations в 6.1.6 нет.

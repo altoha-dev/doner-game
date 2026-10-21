@@ -1,5 +1,5 @@
-import { getCharacter } from '@doner-game/shared';
-import type { BuildPreviewInput, Movement, RaceControls, RoomCommand } from '@doner-game/shared';
+import { getCharacter, PLAYER_PHYSICS } from '@doner-game/shared';
+import type { BuildPreviewInput, Movement, RaceControls, RaceInputBatch, RoomCommand } from '@doner-game/shared';
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const keys = (v: Record<string, unknown>, allowed: string[]) => Object.keys(v).every(k => allowed.includes(k));
 const integer = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v < 1000000000;
@@ -26,6 +26,16 @@ export function parseRaceControls(value: unknown): RaceControls | null {
   if (!record(value) || !keys(value, ['round', 'sequence', 'direction', 'jump'])) return null;
   if (!integer(value.round) || !integer(value.sequence) || !integer(value.jump) || Number(value.jump) > Number(value.sequence) || ![-1, 0, 1].includes(value.direction as number)) return null;
   return value as unknown as RaceControls;
+}
+export function parseRaceInput(value: unknown): RaceInputBatch | null {
+  if (!record(value) || !keys(value, ['round', 'frames']) || !integer(value.round) || !Array.isArray(value.frames) || value.frames.length < 1 || value.frames.length > PLAYER_PHYSICS.inputPacketSteps) return null;
+  let previous = -1, jump = -1;
+  for (const frame of value.frames) {
+    if (!record(frame) || !keys(frame, ['sequence', 'direction', 'jump']) || !parseRaceControls({ ...frame, round: value.round }) || frame.sequence === 0) return null;
+    if ((previous >= 0 && frame.sequence !== previous + 1) || Number(frame.jump) < jump) return null;
+    previous = Number(frame.sequence); jump = Number(frame.jump);
+  }
+  return value as unknown as RaceInputBatch;
 }
 export function parsePreview(value: unknown): BuildPreviewInput | null {
   if (!record(value) || !keys(value, ['round', 'sequence', 'objectType', 'position']) || !integer(value.round) || !integer(value.sequence) || value.objectType !== 'basic-platform') return null;

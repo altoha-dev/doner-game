@@ -20,7 +20,7 @@ async function client(index, startParam = '') {
     const handlers = new Set(); window.__back = () => handlers.forEach(cb => cb());
     window.Telegram = { WebApp: { initData, initDataUnsafe: { start_param: startParam }, themeParams: {}, ready() {}, expand() {}, isVersionAtLeast() { return true; }, setHeaderColor() {}, setBackgroundColor() {}, onEvent() {}, offEvent() {}, isVerticalSwipesEnabled: true, disableVerticalSwipes() { this.isVerticalSwipesEnabled = false; }, enableVerticalSwipes() { this.isVerticalSwipesEnabled = true; }, BackButton: { show() {}, hide() {}, onClick(cb) { handlers.add(cb); }, offClick(cb) { handlers.delete(cb); } } } };
   }, { ...fixture.fixtures[index], startParam });
-  await page.goto(base); return { page, context };
+  await page.goto(`${base}/?netdebug=1`); return { page, context };
 }
 async function widths(page, label) {
   for (const width of [320, 375, 390, 430, 500]) {
@@ -62,6 +62,11 @@ try {
   await B.waitForFunction(() => document.querySelector('[data-testid=block-count]')?.textContent === '1/20');
   await build(B, 2, 1);
   await A.getByRole('heading', { name: /RACE/ }).waitFor(); await B.getByRole('heading', { name: /RACE/ }).waitFor();
+  if (production) {
+    assert.equal(await A.locator('.network-debug').count(), 0);
+    assert.equal(await A.locator('.phaser-host').getAttribute('data-network-diagnostics'), null);
+    checks++;
+  }
   if (!production) {
     assert.equal(await A.locator('.phaser-host').getAttribute('data-remote-players'), '1');
     assert.equal(await A.locator('.phaser-host').getAttribute('data-remote-names'), 'Айгерим');

@@ -44,3 +44,4 @@
 .result-actions { display: grid; gap: 10px; margin-top: 20px; }
 .app-shell--game .footer { margin-top: 12px; padding-top: 10px; }
 @media (max-height: 650px) { .phaser-host { height: 224px; } .phase-hud { margin: 4px 0; } .round-strip { margin-top: 6px; } .game-controls { margin-top: 10px; } .game-control { min-height: 56px; } .game-keyboard-hint { display: none; } }
+.network-debug { position: absolute; top: 4px; right: 4px; z-index: 20; margin: 0; padding: 5px; background: #101e38e8; color: #c5e7dd; font: 9px/1.4 monospace; pointer-events: none; white-space: pre-wrap; max-width: calc(100% - 8px); }

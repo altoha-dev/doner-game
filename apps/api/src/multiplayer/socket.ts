@@ -7,7 +7,7 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import { RoomError, RoomManager } from './manager.js';
 import type { RoomTiming } from './manager.js';
 import { roomStore } from './store.js';
-import { parseCommand, parsePreview, parseRaceControls, RateGate } from './validation.js';
+import { parseCommand, parsePreview, parseRaceInput, RateGate } from './validation.js';
 interface SocketData { profile: PlayerProfileDto; expiresAt: number }
 
 export async function attachMultiplayer(app: FastifyInstance, config: ApiConfig, players: PlayerStore, db: PrismaClient, timing?: RoomTiming) {
@@ -74,7 +74,10 @@ export async function attachMultiplayer(app: FastifyInstance, config: ApiConfig,
     });
     socket.on('race:input', raw => {
       if (users.get(userId) !== socket.id || Date.now() >= socket.data.expiresAt || !gate.take(`move:${userId}`, 35, 1000)) return;
-      const value = parseRaceControls(raw); if (value) manager.input(userId, value);
+      const value = parseRaceInput(raw); if (value) manager.input(userId, value);
+    });
+    socket.on('net:ping', ack => {
+      if (typeof ack === 'function' && users.get(userId) === socket.id && Date.now() < socket.data.expiresAt && gate.take(`ping:${userId}`, 2, 1000)) ack();
     });
     socket.on('build:preview', raw => {
       if (users.get(userId) !== socket.id || Date.now() >= socket.data.expiresAt || !gate.take(`preview:${userId}`, 16, 1000)) return;

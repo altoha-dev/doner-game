@@ -68,3 +68,23 @@ test('four-player chains remain bounded beside a placed block without accumulate
   simulate(players, 900, { '0': { direction: 1 } }, [floor, placed]);
   for (let i = 1; i < 4; i++) assert.ok(players[i]!.x - players[i - 1]!.x >= cfg.width - .01, JSON.stringify(players.map(p => p.x)));
 });
+test('a jumping support carries its rider once per tick without vertical drift', () => {
+  const bottom = person('bottom', 0, 64), top = person('top', 1, 64, 251);
+  simulate([bottom, top], 2, {});
+  for (let i = 0; i < 12; i++) {
+    simulate([bottom, top], 1, { bottom: { direction: 0, jump: 1 } });
+    assert.equal(top.supportId, 'bottom');
+    assert.ok(Math.abs(bottom.y - top.y - cfg.height) < cfg.tolerance);
+  }
+});
+test('a rider follows the final displacement of a pushed support beside a block', () => {
+  const pusher = person('push', 0, 140), bottom = person('bottom', 1, 151), top = person('top', 2, 151, 251);
+  const wall = { x: 176, y: 240, width: 32, height: 32 };
+  simulate([pusher, bottom, top], 2, {}, [floor, wall]);
+  for (let i = 0; i < 90; i++) {
+    simulate([pusher, bottom, top], 1, { push: { direction: 1 } }, [floor, wall]);
+    assert.ok(Math.abs(top.x - bottom.x) < cfg.tolerance, `tick ${i}: rider ${top.x}, support ${bottom.x}`);
+  }
+  assert.equal(top.supportId, 'bottom');
+  assert.ok(Math.abs(top.x - bottom.x) < cfg.tolerance, `rider ${top.x}, support ${bottom.x}`);
+});

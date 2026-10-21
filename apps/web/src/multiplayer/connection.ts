@@ -1,7 +1,8 @@
 import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
 import { ONLINE_RULES } from '@doner-game/shared';
-import type { ArenaSession, BuildPreview, ClientEvents, MatchSnapshot, MovementSnapshot, OnlineRoom, Point, RaceControls, RoomCommand, RoomReply, ServerEvents } from '@doner-game/shared';
+import type { ArenaSession, BuildPreview, ClientEvents, MatchSnapshot, MovementSnapshot, OnlineRoom, Point, RaceInputBatch, RoomCommand, RoomReply, ServerEvents } from '@doner-game/shared';
+import { NetworkDiagnostics } from './diagnostics';
 
 export interface ConnectionView {
   room: OnlineRoom | null; status: 'connecting' | 'connected' | 'reconnecting' | 'error';
@@ -11,7 +12,8 @@ export interface NetworkBridge {
   localId: string;
   getRoom(): OnlineRoom | null;
   isConnected(): boolean;
-  sendInput(input: RaceControls): void;
+  sendInput(input: RaceInputBatch): void;
+  diagnostics: NetworkDiagnostics | undefined;
   subscribeMovement(listener: (snapshot: MovementSnapshot, reset: boolean) => void): () => void;
   getMovement(): MovementSnapshot | null;
   setPreview(position: Point | null): void;
@@ -22,6 +24,7 @@ export function createRoomConnection(url: string, token: string, userId: string)
   let view: ConnectionView = { room: null, status: 'connecting', error: null, pending: false, authExpired: false, previews: [] };
   let lastMatch: MatchSnapshot | null = null;
   let destroyed = false, movement: MovementSnapshot | null = null;
+  const diagnostics = import.meta.env.DEV ? new NetworkDiagnostics() : undefined;
   let previewSequence = 0, receivedPreviewSequence = -1, intent: Point | null = null, sentPreview = '', sentAt = 0;
   const expiry = new Map<string, number>();
   const listeners = new Set<() => void>(), motionListeners = new Set<(s: MovementSnapshot, reset: boolean) => void>(), previewListeners = new Set<() => void>();
@@ -30,7 +33,7 @@ export function createRoomConnection(url: string, token: string, userId: string)
   const previews = (values: readonly BuildPreview[]) => { update({ previews: values }); previewListeners.forEach(fn => fn()); };
   const snapshot = (room: OnlineRoom | null) => {
     if (room && view.room?.roomId === room.roomId && room.revision < view.room.revision) return;
-    if (room?.roomId !== view.room?.roomId || room?.match.round !== view.room?.match.round) { movement = null; receivedPreviewSequence = -1; intent = null; previews([]); }
+    if (room?.roomId !== view.room?.roomId || room?.match.round !== view.room?.match.round) { movement = null; diagnostics?.reset(); receivedPreviewSequence = -1; intent = null; previews([]); }
     if (room) lastMatch = room.match;
     update({ room });
     if (!room || room.match.phase !== 'BUILD') { intent = null; previews([]); }
@@ -52,16 +55,23 @@ export function createRoomConnection(url: string, token: string, userId: string)
     } finally { update({ pending: false }); }
   }
   socket.on('connect', () => {
-    movement = null; receivedPreviewSequence = -1; previewSequence = 0; sentPreview = '';
+    movement = null; diagnostics?.reset(); receivedPreviewSequence = -1; previewSequence = 0; sentPreview = '';
     update({ status: 'connected', error: null, authExpired: false }); void request({ type: 'RESUME' });
   });
   socket.on('disconnect', reason => { intent = null; previews([]); update({ status: reason === 'io server disconnect' ? 'error' : 'reconnecting', pending: false }); });
   socket.on('connect_error', error => update({ status: 'error', error: error.message === 'INVALID_ACCESS_TOKEN' ? 'Сессия истекла. Подключите аккаунт заново.' : 'Нет соединения с комнатой. Повторяем подключение…', authExpired: error.message === 'INVALID_ACCESS_TOKEN' }));
   socket.on('room:snapshot', snapshot);
   socket.on('race:snapshot', value => {
-    if (value.roomId !== view.room?.roomId || value.round !== view.room.match.round || (movement && value.sequence <= movement.sequence)) return;
+    if (value.roomId !== view.room?.roomId || value.round !== view.room.match.round || view.room.match.phase !== 'RACE') return;
+    if (movement && (value.sequence <= movement.sequence || value.tick < movement.tick)) { if (diagnostics) diagnostics.stale++; return; }
+    diagnostics?.snapshot(performance.now(), value.serverTime, value.tick);
     const reset = !movement; movement = value; motionListeners.forEach(fn => fn(value, reset));
   });
+  const pingTimer = import.meta.env.DEV ? setInterval(() => {
+    if (!socket.connected || destroyed) return;
+    const at = performance.now();
+    void socket.timeout(1500).emitWithAck('net:ping').then(() => { if (diagnostics && !destroyed) diagnostics.rtt = performance.now() - at; }).catch(() => {});
+  }, 2000) : undefined;
   socket.on('build:previews', value => {
     if (value.roomId !== view.room?.roomId || value.round !== view.room.match.round || view.room.match.phase !== 'BUILD' || value.sequence <= receivedPreviewSequence) return;
     receivedPreviewSequence = value.sequence;
@@ -86,8 +96,8 @@ export function createRoomConnection(url: string, token: string, userId: string)
   }, 1000 / ONLINE_RULES.previewHz);
   const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
   const bridge: NetworkBridge = {
-    localId: userId, getRoom: () => view.room, getMovement: () => movement, isConnected: () => view.status === 'connected',
-    sendInput(input) { if (socket.connected && view.status === 'connected') socket.volatile.emit('race:input', input); },
+    localId: userId, diagnostics, getRoom: () => view.room, getMovement: () => movement, isConnected: () => view.status === 'connected',
+    sendInput(input) { if (input.frames.length && socket.connected && view.status === 'connected') socket.volatile.emit('race:input', input); },
     subscribeMovement(fn) { motionListeners.add(fn); return () => { motionListeners.delete(fn); }; },
     setPreview(position) { intent = position; flushPreview(); },
     getPreviews: () => view.previews,
@@ -107,7 +117,7 @@ export function createRoomConnection(url: string, token: string, userId: string)
   return {
     getSnapshot: () => view, subscribe, request, bridge, arenaSession,
     connect() { socket.connect(); }, retry() { if (socket.connected) void request({ type: 'RESUME' }); else socket.connect(); },
-    destroy() { destroyed = true; clearInterval(previewTimer); socket.removeAllListeners(); socket.disconnect(); listeners.clear(); motionListeners.clear(); previewListeners.clear(); },
+    destroy() { destroyed = true; clearInterval(previewTimer); clearInterval(pingTimer); socket.removeAllListeners(); socket.disconnect(); listeners.clear(); motionListeners.clear(); previewListeners.clear(); },
   };
 }
 export type RoomConnection = ReturnType<typeof createRoomConnection>;

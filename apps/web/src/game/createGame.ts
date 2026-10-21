@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import { CHARACTERS, PLAYER_COLORS, PLAYER_PHYSICS } from '@doner-game/shared';
-import type { BuildPreview, MovementSnapshot, NetworkImpact, NetworkPlayer, RaceControls } from '@doner-game/shared';
+import type { BuildPreview, MovementSnapshot, NetworkImpact } from '@doner-game/shared';
 import type { NetworkBridge } from '../multiplayer/connection';
 import { RacePrediction } from '../multiplayer/prediction';
+import { RacePresentation } from '../multiplayer/presentation';
 import type { ArenaDefinition, CharacterId, MatchSnapshot, Point } from '@doner-game/shared';
 import type { GameInput } from './input';
 import { MOVEMENT } from './level';
@@ -41,10 +42,12 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
     private reachedGoal = false;
     private prediction = network ? new RacePrediction(network.localId, arena) : null;
     private accumulator = 0;
-    private offset = { x: 0, y: 0 };
+    private presentation: RacePresentation | null = null;
+    private debugOverlay?: HTMLPreElement;
+    private diagnosticAt = 0;
     private sentAt = -Infinity;
     private ownLabel?: Phaser.GameObjects.Text;
-    private remote = new Map<string, { sprite: Phaser.GameObjects.Sprite; label: Phaser.GameObjects.Text; target: NetworkPlayer | null; fromX: number; fromY: number; receivedAt: number }>();
+    private remote = new Map<string, { sprite: Phaser.GameObjects.Sprite; label: Phaser.GameObjects.Text }>();
     private cancelNetwork: (() => void)[] = [];
     private previews = new Map<string, { graphic: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text; value: BuildPreview; fromX: number; fromY: number; at: number }>();
     private impacts!: Phaser.GameObjects.Graphics;
@@ -80,6 +83,11 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       }
       this.scale.on(Phaser.Scale.Events.RESIZE, this.resize, this);
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.scale.off(Phaser.Scale.Events.RESIZE, this.resize, this); this.cancelNetwork.forEach(cancel => cancel()); });
+      if (import.meta.env.DEV && network && new URLSearchParams(location.search).get('netdebug') === '1') {
+        this.debugOverlay = document.createElement('pre'); this.debugOverlay.className = 'network-debug';
+        this.debugOverlay.setAttribute('aria-label', 'Network diagnostics'); host.append(this.debugOverlay);
+        this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.debugOverlay?.remove());
+      }
       onReady();
     }
     apply() {
@@ -94,8 +102,8 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
         this.phase = snapshot.phase;
         if (snapshot.phase === 'RACE') {
           this.reachedGoal = false; this.elapsedMs = 0;
-          this.accumulator = 0; this.offset = { x: 0, y: 0 }; this.sentAt = -Infinity;
-          const room = network?.getRoom(); if (room) this.prediction?.begin(room);
+          this.accumulator = 0; this.sentAt = -Infinity;
+          const room = network?.getRoom(); if (room) { this.prediction?.begin(room); this.presentation = new RacePresentation(network!.localId, arena, [...arena.geometry, ...snapshot.placements]); }
           this.player.setPosition(spawn().x, spawn().y).setVelocity(0, 0).setAcceleration(0, 0);
           (this.player.body as Phaser.Physics.Arcade.Body).reset(this.player.x, this.player.y);
           this.cameras.main.startFollow(this.player, true, 1, 1);
@@ -118,7 +126,7 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       for (const p of room.players.filter(p => !p.left && p.playerId !== network.localId)) {
         if (!this.remote.has(p.playerId)) {
           const at = arena.spawns[p.seat] ?? arena.spawns[0]!;
-          this.remote.set(p.playerId, { sprite: this.add.sprite(at.x, at.y, getPlayerVisual(p.characterId).texture, 0).setOrigin(.5, 1).setDepth(5), label: label(p.displayName), target: null, fromX: at.x, fromY: at.y, receivedAt: 0 });
+          this.remote.set(p.playerId, { sprite: this.add.sprite(at.x, at.y, getPlayerVisual(p.characterId).texture, 0).setOrigin(.5, 1).setDepth(5), label: label(p.displayName) });
         }
       }
       for (const [id, actor] of this.remote) {
@@ -129,17 +137,10 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
     }
     receiveMovement(value: MovementSnapshot, reset: boolean) {
       if (!this.player || value.round !== snapshot.round || snapshot.phase !== 'RACE') return;
-      this.prediction?.reconcile(value, reset);
-      const me = this.prediction?.own;
-      if (me) {
-        const dx = this.player.x - me.x, dy = this.player.y - me.y;
-        const contact = this.prediction!.players.some(p => p.playerId !== me.playerId && p.active && Math.abs(p.x - me.x) < PLAYER_PHYSICS.width + 4 && Math.abs(p.y - me.y) < PLAYER_PHYSICS.height + 4);
-        this.offset = !reset && !contact && Math.hypot(dx, dy) < PLAYER_PHYSICS.correctionSnapDistance ? { x: dx, y: dy } : { x: 0, y: 0 };
-      }
-      for (const player of value.players) {
-        const actor = this.remote.get(player.playerId);
-        if (actor) { actor.fromX = actor.sprite.x; actor.fromY = actor.sprite.y; actor.target = player; actor.receivedAt = performance.now(); }
-      }
+      if (!this.prediction?.reconcile(value, reset)) return;
+      const correction = this.prediction.lastCorrection;
+      this.presentation?.receive(value, this.prediction.players, performance.now(), correction.reset);
+      if (import.meta.env.DEV) network?.diagnostics?.correction(performance.now(), correction.distance, correction.reset);
       for (const impact of value.impacts) {
         if (this.seenImpacts.has(impact.id)) continue;
         this.seenImpacts.add(impact.id);
@@ -215,34 +216,29 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       if (network) {
         if (snapshot.phase === 'RACE' && network.isConnected()) {
           this.accumulator += Math.min(delta, 100);
-          let control: RaceControls | undefined;
+          let stepped = false;
           while (this.accumulator >= 1000 / PLAYER_PHYSICS.tickHz) {
             this.accumulator -= 1000 / PLAYER_PHYSICS.tickHz;
-            control = this.prediction!.step(paused ? 0 : input.direction as -1 | 0 | 1, !paused && input.consumeJump());
+            stepped = true; this.prediction!.step(paused ? 0 : input.direction as -1 | 0 | 1, !paused && input.consumeJump());
           }
-          if (control && time - this.sentAt >= 1000 / PLAYER_PHYSICS.inputHz) { this.sentAt = time; network.sendInput(control); }
+          if (stepped && time - this.sentAt >= 1000 / PLAYER_PHYSICS.inputHz) { this.sentAt = time; network.sendInput(this.prediction!.packet()); }
           const own = this.prediction?.own;
           if (own) {
-            this.offset.x *= PLAYER_PHYSICS.correctionDecay; this.offset.y *= PLAYER_PHYSICS.correctionDecay;
             body.reset(own.x, own.y); body.blocked.down = own.grounded;
-            this.player.setPosition(own.x + this.offset.x, own.y + this.offset.y).setVelocity(own.velocityX, own.velocityY);
+            this.player.setVelocity(own.velocityX, own.velocityY);
             if (own.velocityX) this.player.setFlipX(own.velocityX < 0);
             this.player.setFrame(playerFrame(visual, own.grounded, own.velocityX, time));
             this.reachedGoal = own.finished;
           }
         }
-        for (const actor of this.remote.values()) if (actor.target) {
-          const alpha = Phaser.Math.Clamp((performance.now() - actor.receivedAt) / PLAYER_PHYSICS.interpolationMs, 0, 1);
-          actor.sprite.setPosition(Phaser.Math.Linear(actor.fromX, actor.target.x, alpha), Phaser.Math.Linear(actor.fromY, actor.target.y, alpha));
-          const own = this.prediction?.own, predicted = this.prediction?.players.find(p => p.playerId === actor.target!.playerId);
-          if (own && predicted?.active && (own.supportId === predicted.playerId || predicted.supportId === own.playerId ||
-            (Math.abs(predicted.x - own.x) < PLAYER_PHYSICS.width + 4 && Math.abs(predicted.y - own.y) < PLAYER_PHYSICS.height + 4))) {
-            // Nearby contacts use the same predicted world as the local body; avoid drawing overlap.
-            actor.sprite.setPosition(predicted.x, predicted.y);
-          }
-          actor.sprite.setFlipX(actor.target.velocityX < 0);
-          const character = network.getRoom()?.players.find(p => p.playerId === actor.target!.playerId)?.characterId ?? 'altoha';
-          actor.sprite.setFrame(playerFrame(getPlayerVisual(character), actor.target.grounded, actor.target.velocityX, time));
+        const rendered = this.prediction && this.presentation?.sample(this.prediction.players, performance.now(), delta);
+        for (const state of rendered ?? []) {
+          if (state.playerId === network.localId) { this.player.setPosition(state.x, state.y); continue; }
+          const actor = this.remote.get(state.playerId); if (!actor) continue;
+          actor.sprite.setPosition(state.x, state.y);
+          if (Math.abs(state.velocityX) > .1) actor.sprite.setFlipX(state.velocityX < 0);
+          const character = network.getRoom()?.players.find(p => p.playerId === state.playerId)?.characterId ?? 'altoha';
+          actor.sprite.setFrame(playerFrame(getPlayerVisual(character), state.grounded, state.velocityX, time));
         }
         for (const item of this.previews.values()) {
           const alpha = Phaser.Math.Clamp((performance.now() - item.at) / PLAYER_PHYSICS.interpolationMs, 0, 1);
@@ -276,6 +272,15 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       if (import.meta.env.DEV) {
         this.frameTimes.push(delta); if (this.frameTimes.length > 120) this.frameTimes.shift();
         host.dataset.fps = String(Math.round(1000 * this.frameTimes.length / this.frameTimes.reduce((a, b) => a + b, 0)));
+        if (network?.diagnostics && time - this.diagnosticAt >= 250) {
+          this.diagnosticAt = time;
+          const stats = network.diagnostics.read(performance.now(), Number(host.dataset.fps));
+          host.dataset.networkDiagnostics = JSON.stringify(stats);
+          if (this.debugOverlay) this.debugOverlay.textContent = `RTT ${stats.rttMs}ms · jitter ${stats.jitterMs}ms
+Tick ${stats.serverTick} · snapshots ${stats.snapshotHz}/s · FPS ${stats.fps}
+Error ${stats.error}px · corrections ${stats.correctionsPerSecond}/s
+Max ${stats.largestCorrection}px · stale ${stats.staleSnapshots} · gaps ≈${stats.estimatedMissingSnapshots}`;
+        }
         host.dataset.authoritativePlayers = JSON.stringify(network?.getMovement()?.players ?? []);
         host.dataset.authoritativeImpacts = JSON.stringify(network?.getMovement()?.impacts ?? []);
         host.dataset.playerSupport = this.prediction?.own?.supportId ?? '';

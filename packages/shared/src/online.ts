@@ -40,6 +40,8 @@ export interface Movement {
   round: number; sequence: number; x: number; y: number; velocityX: number; velocityY: number;
 }
 export interface RaceControls extends PlayerControls { round: number }
+// One sequence is one fixed physics step. Packets retain a short redundant input tail.
+export interface RaceInputBatch { round: number; frames: readonly PlayerControls[] }
 export interface NetworkPlayer extends PhysicsPlayer { round: number }
 export interface NetworkImpact extends PlayerImpact { id: string; tick: number }
 export interface MovementSnapshot { roomId: string; round: number; sequence: number; serverTime: number; tick: number; players: NetworkPlayer[]; impacts: NetworkImpact[] }
@@ -58,7 +60,8 @@ export function buildPlayerStatus(room: OnlineRoom, player: OnlinePlayer, previe
 export interface ClientEvents {
   'room:command': (command: RoomCommand, ack: (reply: RoomReply) => void) => void;
   'race:move': (movement: Movement) => void;
-  'race:input': (input: RaceControls) => void;
+  'race:input': (input: RaceInputBatch) => void;
+  'net:ping': (ack: () => void) => void;
   'build:preview': (preview: BuildPreviewInput) => void;
 }
 export interface ServerEvents {
