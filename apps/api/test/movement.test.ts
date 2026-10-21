@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SNOWY_CHAOS, buildMiniAppLink, roomCodeFromStartParam } from '@doner-game/shared';
 import { initialMovement, validateMovement, atFinish } from '../src/multiplayer/movement.ts';
-import { parseCommand, parseMovement, RateGate } from '../src/multiplayer/validation.ts';
+import { parseCommand, parseMovement, parsePreview, parseRaceControls, RateGate } from '../src/multiplayer/validation.ts';
 
 test('movement rejects teleport, impossible velocity, stale sequence, floor/wall penetration and hovering', () => {
   const history = initialMovement('player', 0, 1, 1000);
@@ -35,4 +35,12 @@ test('room invite uses the existing Main Mini App helper and accepts only a room
   assert.equal(roomCodeFromStartParam('room_x7k2m9'), 'X7K2M9'); assert.equal(roomCodeFromStartParam('solo'), null);
   assert.equal(roomCodeFromStartParam('room_X7K2M9&token=secret'), null);
   assert.throws(() => buildMiniAppLink('bad/name', 'home'));
+});
+test('input and preview contracts reject identity/coordinates/status injection and unbounded values', () => {
+  const input = { round: 1, sequence: 10, direction: -1, jump: 2 };
+  assert.deepEqual(parseRaceControls(input), input);
+  for (const value of [{ ...input, direction: 2 }, { ...input, jump: 11 }, { ...input, sequence: NaN }, { ...input, x: 1080 }, { ...input, playerId: 'other' }]) assert.equal(parseRaceControls(value), null);
+  const preview = { round: 1, sequence: 2, objectType: 'basic-platform', position: { x: 176, y: 240 } };
+  assert.deepEqual(parsePreview(preview), preview); assert.ok(parsePreview({ ...preview, position: null }));
+  for (const value of [{ ...preview, valid: true }, { ...preview, roomId: 'other' }, { ...preview, userId: 'other' }, { ...preview, position: { x: Infinity, y: 240 } }, { ...preview, position: { x: 1000000, y: 240 } }, { ...preview, position: {} }]) assert.equal(parsePreview(value), null);
 });

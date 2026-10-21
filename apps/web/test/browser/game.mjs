@@ -43,7 +43,7 @@ async function widthChecks(page, screen) {
     for (const button of await page.locator('button:visible').all()) {
       const b = await button.boundingBox(); assert.ok(b.height >= 44 && b.x >= 0 && b.x + b.width <= width + 1, `${screen} target ${width}`);
     }
-    if (screen !== 'home') assert.deepEqual(await page.locator('canvas').evaluate(c => [c.clientWidth / c.width, c.clientHeight / c.height]), [2, 2]);
+    if (!['home', 'characters'].includes(screen)) assert.deepEqual(await page.locator('canvas').evaluate(c => [c.clientWidth / c.width, c.clientHeight / c.height]), [2, 2]);
     if (!production) await page.screenshot({ path: `${shots}/${screen}-${width}.png`, fullPage: true });
     checks++;
   }
@@ -151,8 +151,10 @@ try {
   const auth = await context(true);
   await auth.page.goto(base); await auth.page.getByText('Привет, Антон').waitFor(); await auth.page.getByText('@winter_friend').waitFor();
   assert.equal(await auth.page.getByAltText('Аватар Telegram').count(), 1);
-  for (const id of ['aigerim', 'temik']) {
+  for (const id of ['aigerim', 'temik', 'ayazhan']) {
     await auth.page.getByRole('button', { name: 'ПЕРСОНАЖИ', exact: true }).click();
+    assert.equal(await auth.page.locator('.character-card').count(), 4);
+    if (id === 'ayazhan') await widthChecks(auth.page, 'characters');
     await auth.page.locator(`[data-character=${id}]`).getByRole('button', { name: 'ВЫБРАТЬ', exact: true }).click();
     await auth.page.locator(`[data-character=${id}]`).getByRole('button', { name: '✓ ВЫБРАН', exact: true }).waitFor();
     await auth.page.getByRole('button', { name: 'НА ТРЕНИРОВКУ →' }).click(); await ready(auth.page);
@@ -161,6 +163,7 @@ try {
     await auth.page.evaluate(() => window.__back()); await auth.page.getByRole('heading', { name: 'DONER GAME' }).waitFor(); assert.equal(await auth.page.evaluate(() => window.Telegram.WebApp.isVerticalSwipesEnabled), true);
     assert.equal(auth.progress.doners, 42); checks++;
   }
+  assert.ok(!auth.requests.some(r => /ayazhan\/unlock/.test(r.url)));
   await auth.page.reload(); await auth.page.getByText('Привет, Антон').waitFor(); assert.equal(auth.progress.selectedCharacterId, 'temik');
   assert.equal(await auth.page.locator('.hud-coin').first().innerText(), 'DONER ×42');
   assert.ok(!auth.requests.some(r => /unlock|reward|purchase/.test(r.url))); assert.deepEqual(auth.errors, []);

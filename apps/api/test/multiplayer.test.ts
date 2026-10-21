@@ -3,8 +3,8 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
-import { SNOWY_CHAOS } from '@doner-game/shared';
-import type { ClientEvents, OnlineRoom, RoomCommand, ServerEvents } from '@doner-game/shared';
+import { CHARACTERS } from '@doner-game/shared';
+import type { ClientEvents, MovementSnapshot, OnlineRoom, PreviewSnapshot, RoomCommand, ServerEvents } from '@doner-game/shared';
 import { buildApp } from '../src/app.ts';
 import { createDatabase } from '../src/db.ts';
 import { createPlayerStore } from '../src/players.ts';
@@ -81,33 +81,23 @@ test('real Socket.IO + PostgreSQL shared match, authorization, recovery and unch
   await t.test('teleport and spoofed movement cannot finish; real movement fanout', async () => {
     A.emit('race:move', { round: 1, sequence: 1, x: 1080, y: 272, velocityX: 100, velocityY: 0 });
     await sleep(100); assert.equal((await ok(A, { type: 'RESUME' })).finishes.length, 0);
-    let received = false; B.on('race:snapshot', s => { if (s.players.some(p => p.playerId === a.user.id && p.x === 52)) received = true; });
-    A.emit('race:move', { round: 1, sequence: 2, x: 52, y: 272, velocityX: 50, velocityY: 0 }); await until(() => received);
+    let received = false; B.on('race:snapshot', s => { if (s.players.some(p => p.playerId === a.user.id && p.x > 48)) received = true; });
+    A.emit('race:input', { round: 1, sequence: 2, direction: 1, jump: 0 }); await until(() => received);
   });
-  await t.test('validated movement reaches finish in server arrival order, with no duplicate results', async () => {
-    const solids = [...SNOWY_CHAOS.geometry, ...room.match.placements];
-    const states = [{ socket: A, x: 52, y: 272, vy: 0, sequence: 10, delay: 0 }, { socket: B, x: 64, y: 272, vy: 0, sequence: 10, delay: 1200 }];
+  await t.test('authoritative input simulation reaches finish in server order, with no duplicate results', async () => {
+    const states = [{ socket: A, sequence: 10, jump: 0, delay: 0 }, { socket: B, sequence: 10, jump: 0, delay: 1800 }];
     const began = Date.now();
-    while (Date.now() - began < 22000 && transport.manager.current(a.user.id)?.match.phase === 'RACE') {
+    let iteration = 0;
+    while (Date.now() - began < 25000 && transport.manager.current(a.user.id)?.match.phase === 'RACE') {
       for (const p of states) {
-        if (Date.now() - began < p.delay || p.x > 1080) continue;
-        for (let frame = 0; frame < 3; frame++) {
-          const grounded = solids.some(s => Math.abs(p.y - s.y) < .01 && p.x + 5 > s.x && p.x - 5 < s.x + s.width);
-          if (grounded) p.vy = -224;
-          const oldX = p.x; p.x += 100 / 60;
-          for (const s of solids) if (p.x + 5 > s.x && p.x - 5 < s.x + s.width && p.y > s.y + .01 && p.y - 21 < s.y + s.height) p.x = oldX;
-          const oldY = p.y; p.vy = Math.min(420, p.vy + 660 / 60); p.y += p.vy / 60;
-          for (const s of solids) if (p.x + 5 > s.x && p.x - 5 < s.x + s.width) {
-            if (p.vy >= 0 && oldY <= s.y && p.y >= s.y) { p.y = s.y; p.vy = 0; }
-            else if (p.vy < 0 && oldY - 21 >= s.y + s.height && p.y - 21 < s.y + s.height) { p.y = s.y + s.height + 21; p.vy = 0; }
-          }
-        }
-        p.socket.emit('race:move', { round: 1, sequence: ++p.sequence, x: p.x, y: p.y, velocityX: 100, velocityY: p.vy });
+        const running = Date.now() - began >= p.delay;
+        if (running && iteration % 8 === 0) p.jump++;
+        p.socket.emit('race:input', { round: 1, sequence: ++p.sequence, direction: running ? 1 : 0, jump: p.jump });
       }
-      await sleep(50);
+      iteration++; await sleep(50);
     }
     room = await ok(A, { type: 'RESUME' });
-    assert.equal(room.match.phase, 'RESULTS', JSON.stringify(states.map(({ socket: _, ...rest }) => rest)));
+    assert.equal(room.match.phase, 'RESULTS', JSON.stringify(transport.manager.movementSnapshot(a.user.id)));
     const finished = room.finishes.filter(f => f.round === 1).sort((x, y) => (x.position ?? 99) - (y.position ?? 99));
     assert.deepEqual(finished.map(f => [f.playerId, f.position, f.status]), [[a.user.id, 1, 'FINISHED'], [b.user.id, 2, 'FINISHED']]);
     A.emit('race:move', { round: 1, sequence: 9999, x: 1080, y: 272, velocityX: 0, velocityY: 0 }); await sleep(100);
@@ -157,5 +147,174 @@ test('real Socket.IO + PostgreSQL shared match, authorization, recovery and unch
     for (const id of ids) { const p = await players.findById(id); assert.equal(p?.progress.doners, 42); assert.equal(p?.progress.goldenDoners, 3); assert.deepEqual(p?.progress.unlockedCharacterIds, ['altoha']); }
     assert.equal((await app.inject({ url: '/health' })).statusCode, 200);
     assert.equal((await app.inject({ url: '/me', headers: { authorization: `Bearer ${a.accessToken}` } })).statusCode, 200);
+  });
+});
+
+test('Stage 6.1.5 real clients: previews, authoritative body contacts, head jumps and recovery', { skip: !url && 'Requires isolated TEST_DATABASE_URL', timeout: 90000 }, async t => {
+  assert.ok(url); assert.match(new URL(url).pathname, /_test$/);
+  const db = createDatabase(url), players = createPlayerStore(db);
+  const cfg = { ...config, databaseUrl: url, botUsername: 'doner_test_bot' };
+  const app = await buildApp(cfg, players, false);
+  const { manager } = await attachMultiplayer(app, cfg, players, db, { buildMs: 30000, raceMs: 45000, reconnectGraceMs: 150, roomTtlMs: 120000 });
+  await app.listen({ host: '127.0.0.1', port: 0 });
+  const address = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  const ids: string[] = [], clients: Client[] = [], roomIds: string[] = [];
+  const latest = new Map<string, MovementSnapshot>(), previews = new Map<string, PreviewSnapshot>();
+  const controls = new Map<string, { socket: Client; sequence: number; direction: -1 | 0 | 1; jump: number; silent: boolean }>();
+  let round = 1;
+  const heartbeat = setInterval(() => {
+    for (const control of controls.values()) if (control.socket.connected && !control.silent) control.socket.emit('race:input', { round, sequence: ++control.sequence, direction: control.direction, jump: control.jump });
+  }, 50);
+  t.after(async () => { clearInterval(heartbeat); clients.forEach(c => c.disconnect()); await app.close(); await db.room.deleteMany({ where: { id: { in: roomIds } } }); await db.user.deleteMany({ where: { id: { in: ids } } }); await db.$disconnect(); });
+  async function login(index: number) {
+    const result = await app.inject({ method: 'POST', url: '/auth/telegram', payload: { initData: signInitData({ user: JSON.stringify({ id: 5300000000000000 + Date.now() + index, first_name: ['Антон', 'Айгерим', 'Друг вне комнаты'][index] }) }) } });
+    assert.equal(result.statusCode, 200); const profile = result.json(); ids.push(profile.user.id);
+    await db.playerProgress.update({ where: { userId: profile.user.id }, data: { doners: 42, goldenDoners: 3 } }); return profile;
+  }
+  async function connect(profile: Awaited<ReturnType<typeof login>>) {
+    const socket: Client = io(address, { auth: { token: profile.accessToken }, transports: ['websocket'], reconnection: false, forceNew: true }); clients.push(socket);
+    socket.on('race:snapshot', value => latest.set(profile.user.id, value));
+    socket.on('build:previews', value => previews.set(profile.user.id, value));
+    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('connect_error', reject); });
+    const existing = controls.get(profile.user.id);
+    controls.set(profile.user.id, { socket, sequence: existing?.sequence ?? 0, direction: 0, jump: existing?.jump ?? 0, silent: false }); return socket;
+  }
+  const a = await login(0), b = await login(1), c = await login(2);
+  let A = await connect(a), B = await connect(b); const C = await connect(c);
+  const ok = async (socket: Client, command: RoomCommand) => {
+    const reply = await socket.timeout(3000).emitWithAck('room:command', command); assert.equal(reply.ok, true, JSON.stringify(reply));
+    if (!reply.ok) throw new Error(reply.message); return reply.room!;
+  };
+  let room = await ok(A, { type: 'CREATE', capacity: 4 }); roomIds.push(room.roomId);
+  await ok(B, { type: 'JOIN', code: room.code });
+  const other = await ok(C, { type: 'CREATE', capacity: 2 }); roomIds.push(other.roomId);
+  await t.test('catalog selection is free, shared with peers, permits duplicates and rejects unknown IDs', async () => {
+    const before = (await players.findById(a.user.id))!.progress;
+    for (const character of CHARACTERS) {
+      await ok(A, { type: 'CHARACTER', characterId: character.id });
+      assert.equal((await ok(B, { type: 'RESUME' })).players.find(p => p.playerId === a.user.id)?.characterId, character.id);
+    }
+    room = await ok(B, { type: 'CHARACTER', characterId: 'ayazhan' });
+    assert.equal(room.players.filter(p => p.characterId === 'ayazhan').length, 2);
+    const rejected = await A.timeout(3000).emitWithAck('room:command', { type: 'CHARACTER', characterId: 'unknown' } as never);
+    assert.equal(rejected.ok, false); if (!rejected.ok) assert.equal(rejected.code, 'INVALID_REQUEST');
+    assert.deepEqual((await players.findById(a.user.id))!.progress, before);
+    assert.equal((await db.roomPlayer.findFirstOrThrow({ where: { roomId: room.roomId, userId: a.user.id } })).chosenCharacterId, 'ayazhan');
+  });
+  await ok(A, { type: 'READY', ready: true }); await ok(B, { type: 'READY', ready: true }); room = await ok(A, { type: 'START' });
+  let previewA = 0, previewB = 0;
+  const preview = (socket: Client, sequence: number, x: number | null, y = 240) => socket.emit('build:preview', { round: 1, sequence, objectType: 'basic-platform', position: x === null ? null : { x, y } });
+  const seen = (id: string, owner: string) => previews.get(id)?.previews.find(p => p.playerId === owner);
+  await t.test('live preview owner/validity/sequence/privacy/flood are verified without changing room revision', async () => {
+    const revision = room.revision;
+    preview(A, ++previewA, 176);
+    await until(() => seen(b.user.id, a.user.id)?.position.x === 176);
+    assert.equal(seen(b.user.id, a.user.id)?.displayName, 'Антон'); assert.equal(seen(b.user.id, a.user.id)?.valid, true);
+    preview(A, ++previewA, 48);
+    await until(() => seen(b.user.id, a.user.id)?.valid === false);
+    assert.match(seen(b.user.id, a.user.id)!.reason!, /защищены/);
+    preview(A, 1, 224); await sleep(100); assert.equal(seen(b.user.id, a.user.id)?.position.x, 48);
+    A.emit('build:preview', { round: 1, sequence: 10, objectType: 'basic-platform', position: { x: 224, y: 240 }, playerId: b.user.id } as never);
+    C.emit('build:preview', { round: 1, sequence: 1, objectType: 'basic-platform', position: { x: 224, y: 240 }, roomId: room.roomId } as never);
+    for (let i = 20; i < 150; i++) preview(A, i, 176);
+    previewA = 150;
+    await sleep(200); assert.ok(seen(b.user.id, a.user.id)!.sequence < 149, 'server preview flood gate');
+    assert.equal(previews.get(c.user.id)?.roomId, other.roomId);
+    assert.equal(manager.current(a.user.id)?.revision, revision);
+    assert.equal(await db.trapPlacement.count({ where: { roomId: room.roomId } }), 0);
+  });
+  await t.test('preview expires/cancels and BUILD reconnect restores fresh peers with no duplicate player', async () => {
+    await until(() => !seen(b.user.id, a.user.id), 3000);
+    preview(B, ++previewB, 208, 224); await until(() => Boolean(seen(a.user.id, b.user.id)));
+    preview(B, ++previewB, null); await until(() => !seen(a.user.id, b.user.id));
+    preview(A, ++previewA, 176); preview(B, ++previewB, 208, 224);
+    await until(() => Boolean(seen(b.user.id, a.user.id)));
+    A.disconnect(); await until(() => !seen(b.user.id, a.user.id));
+    A = await connect(a); room = await ok(A, { type: 'RESUME' }); previewA = 0;
+    assert.equal(room.match.phase, 'BUILD'); assert.equal(room.players.filter(p => !p.left).length, 2);
+    assert.equal(room.players.find(p => p.playerId === a.user.id)?.characterId, 'ayazhan');
+    await until(() => Boolean(seen(a.user.id, b.user.id)));
+  });
+  await t.test('replacement socket can restart preview sequence without a duplicate member', async () => {
+    preview(A, ++previewA, 176); await until(() => Boolean(seen(b.user.id, a.user.id)));
+    const old = A; A = await connect(a); await until(() => !old.connected);
+    previewA = 0; preview(A, ++previewA, 224);
+    await until(() => seen(b.user.id, a.user.id)?.position.x === 224);
+    assert.equal((await ok(A, { type: 'RESUME' })).players.filter(p => !p.left).length, 2);
+  });
+  await t.test('commit replaces preview, revalidates overlapping peer; skip clears previews and blocks survive reconnect', async () => {
+    preview(A, ++previewA, 176); preview(B, ++previewB, 176);
+    await until(() => seen(a.user.id, b.user.id)?.valid === true);
+    room = await ok(A, { type: 'RESUME' });
+    room = await ok(A, { type: 'PLACE', round: 1, expectedRevision: room.revision, commandId: randomUUID(), position: { x: 176, y: 240 } });
+    await until(() => !seen(b.user.id, a.user.id) && seen(a.user.id, b.user.id)?.valid === false);
+    assert.equal(room.players.find(p => p.playerId === a.user.id)?.buildDone, true);
+    A.disconnect(); A = await connect(a); room = await ok(A, { type: 'RESUME' });
+    assert.equal(room.match.placements.length, 1); assert.equal(room.players.filter(p => !p.left).length, 2);
+    room = await ok(B, { type: 'SKIP', round: 1 });
+    assert.equal(room.match.phase, 'RACE'); await until(() => previews.get(a.user.id)?.previews.length === 0 && previews.get(b.user.id)?.previews.length === 0);
+  });
+  const state = (id: string) => manager.movementSnapshot(a.user.id)!.players.find(p => p.playerId === id)!;
+  const drive = (id: string, direction: -1 | 0 | 1, jump = false) => { const control = controls.get(id)!; control.direction = direction; if (jump) control.jump++; };
+  await t.test('opposing movement, push and equal authoritative snapshots on both real sockets', async () => {
+    await until(() => state(a.user.id).active && state(b.user.id).active);
+    const revision = manager.current(a.user.id)!.revision;
+    drive(a.user.id, 1); drive(b.user.id, -1); await sleep(350);
+    assert.ok(state(b.user.id).x - state(a.user.id).x >= 9.999);
+    drive(a.user.id, 0); drive(b.user.id, 0); await sleep(150);
+    const before = state(b.user.id).x;
+    drive(a.user.id, 1); await sleep(500); drive(a.user.id, 0);
+    assert.ok(state(b.user.id).x > before + 5, 'server pushes stationary player');
+    await until(() => latest.get(a.user.id)?.sequence === latest.get(b.user.id)?.sequence);
+    assert.deepEqual(latest.get(a.user.id)?.players, latest.get(b.user.id)?.players);
+    assert.equal(manager.current(a.user.id)!.revision, revision, 'motion does not persist room state');
+  });
+  await t.test('land on another head and jump from it through input alone', async () => {
+    await sleep(200);
+    drive(a.user.id, 1, true);
+    await until(() => state(a.user.id).x >= state(b.user.id).x - 4);
+    drive(a.user.id, 0);
+    await until(() => state(a.user.id).supportId === b.user.id);
+    assert.ok(Math.abs(state(a.user.id).y - (state(b.user.id).y - 21)) < .001);
+    const at = state(a.user.id).y; drive(a.user.id, 0, true);
+    await until(() => state(a.user.id).y < at - 8);
+    assert.equal(state(a.user.id).supportId, null);
+    await until(() => latest.get(b.user.id)?.impacts.some(e => e.kind === 'head-jump') === true);
+  });
+  await t.test('pushing beside the placed block stops at its wall; simultaneous jumps stay bounded', async () => {
+    drive(a.user.id, -1); await until(() => state(a.user.id).x < state(b.user.id).x - 20); drive(a.user.id, 0);
+    await until(() => state(a.user.id).grounded && state(a.user.id).y === 272);
+    drive(a.user.id, 1); await until(() => state(b.user.id).x >= 170.9, 6000); await sleep(300); drive(a.user.id, 0);
+    assert.ok(state(b.user.id).x <= 171.001); assert.ok(state(b.user.id).x - state(a.user.id).x >= 9.999);
+    drive(a.user.id, 0, true); drive(b.user.id, 0, true); await sleep(200);
+    assert.ok(state(a.user.id).y < 272 && state(b.user.id).y < 272);
+    for (const p of manager.movementSnapshot(a.user.id)!.players) { assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y)); assert.ok(p.x <= 171.001); }
+  });
+  await t.test('missing input expires, old input is ignored, and RACE reconnect restores the same physical players', async () => {
+    controls.get(a.user.id)!.silent = true; await sleep(450);
+    assert.equal(state(a.user.id).active, false);
+    A.emit('race:input', { round: 1, sequence: 1, direction: 1, jump: 0 });
+    controls.get(a.user.id)!.silent = false; await until(() => state(a.user.id).active);
+    B.disconnect(); await until(() => !state(b.user.id).active);
+    B = await connect(b); room = await ok(B, { type: 'RESUME' });
+    assert.equal(room.match.phase, 'RACE'); assert.equal(room.match.placements.length, 1); assert.equal(room.players.filter(p => !p.left).length, 2);
+    assert.equal(room.players.find(p => p.playerId === b.user.id)?.characterId, 'ayazhan');
+    await until(() => latest.get(a.user.id)?.sequence === latest.get(b.user.id)?.sequence);
+    assert.deepEqual(latest.get(a.user.id)?.players, latest.get(b.user.id)?.players);
+  });
+  await t.test('contacts do not produce false finish; two full runs finish and NEXT retains blocks/balances', async () => {
+    assert.equal(manager.current(a.user.id)!.finishes.length, 0);
+    const started = Date.now();
+    while (manager.current(a.user.id)?.match.phase === 'RACE' && Date.now() - started < 22000) {
+      drive(a.user.id, 1, true); drive(b.user.id, 1, true); await sleep(400);
+    }
+    room = await ok(A, { type: 'RESUME' });
+    assert.equal(room.match.phase, 'RESULTS', JSON.stringify(manager.movementSnapshot(a.user.id)));
+    assert.deepEqual(room.finishes.map(f => f.position).sort(), [1, 2]);
+    assert.deepEqual(room.finishes, (await ok(B, { type: 'RESUME' })).finishes);
+    round = 2;
+    room = await ok(room.hostId === a.user.id ? A : B, { type: 'NEXT' });
+    assert.equal(room.match.phase, 'BUILD'); assert.equal(room.match.placements.length, 1);
+    for (const id of [a.user.id, b.user.id]) { const profile = await players.findById(id); assert.equal(profile?.progress.doners, 42); assert.equal(profile?.progress.goldenDoners, 3); }
   });
 });

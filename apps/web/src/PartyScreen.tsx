@@ -50,7 +50,7 @@ function ConnectedParty({ connection, userId, initialCode, entry, onExit, onReau
     {room?.recoveryMessage && <p className="recovery-note" role="status">{room.recoveryMessage}</p>}
     {room && room.match.phase !== 'LOBBY' && me ? <>
       <p className="online-deadline">{room.deadline ? `ДО КОНЦА ФАЗЫ: ${Math.max(0, Math.ceil((room.deadline - now) / 1000))} СЕК` : 'ОБЩИЙ МАТЧ'} · {room.players.filter(p => p.connected && !p.left).length}/{room.players.filter(p => !p.left).length} НА СВЯЗИ</p>
-      <GameScreen characterId={me.characterId} externalSession={connection.arenaSession} online={{ room, connection, connected: view.status === 'connected', pending: view.pending }} reducedMotion={reducedMotion} onBack={requestExit} onNewMatch={requestExit} />
+      <GameScreen characterId={me.characterId} externalSession={connection.arenaSession} online={{ room, connection, connected: view.status === 'connected', pending: view.pending, previews: view.previews }} reducedMotion={reducedMotion} onBack={requestExit} onNewMatch={requestExit} />
     </> : <>
       <div className="screen-heading"><button className="back-button" onClick={requestExit}>← НАЗАД</button><p className="eyebrow">DONER GAME · WINTER PARTY</p><h1 tabIndex={-1}>{room ? 'СНЕЖНАЯ БАНДА' : 'СОБЕРИ ДРУЗЕЙ'}</h1></div>
       {!room ? <div className="room-entry pixel-panel">

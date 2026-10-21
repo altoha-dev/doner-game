@@ -10,7 +10,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test test/*.test.ts",
     "test:browser": "node test/browser/game.mjs",
-    "test:party": "node test/browser/party.mjs"
+    "test:party": "node test/browser/party.mjs",
+    "test:interactions": "node test/browser/interactions.mjs"
   },
   "dependencies": {
     "@doner-game/shared": "workspace:*",

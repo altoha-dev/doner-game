@@ -23,6 +23,7 @@ const portraitColors: Record<CharacterId, { coat: string; light: string; hair: s
   altoha: { coat: '#d97a36', light: '#ffc16e', hair: '#473c31' },
   aigerim: { coat: '#ab92e8', light: '#f4c8e0', hair: '#41372f' },
   temik: { coat: '#67c8ba', light: '#ecbb6c', hair: '#393c36' },
+  ayazhan: { coat: '#7962b5', light: '#99e6f3', hair: '#343b49' },
 };
 export function CharacterPortrait({ characterId, className = '' }: { characterId?: CharacterId | undefined; className?: string }) {
   const colors = characterId ? portraitColors[characterId] : { coat: '#505c52', light: '#899485', hair: '#343b34' };
@@ -38,5 +39,6 @@ export function CharacterPortrait({ characterId, className = '' }: { characterId
     <path fill="#252c25" d="M12 14h2v2h-2zm7 0h2v2h-2zM15 19h4v1h-4z" />
     <path fill="#f3d2a6" d="M15 13h2v5h-2z" />
     <path fill="#1a201a" d="M7 29h2v3H7zm18 0h2v3h-2z" />
+    {characterId === 'ayazhan' && <><path fill={colors.coat} d="M9 5h14v5H9zM12 3h8v2h-8z" /><path fill={colors.light} d="M9 8h14v2H9zM14 1h4v3h-4z" /></>}
   </svg>;
 }

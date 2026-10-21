@@ -1,11 +1,13 @@
 import type { CharacterId } from './characters.js';
 import type { MatchSnapshot, Point } from './party.js';
+import type { PhysicsPlayer, PlayerControls, PlayerImpact } from './physics.js';
 
 export const ONLINE_RULES = {
   buildMs: 60000, raceMs: 90000, reconnectGraceMs: 30000, roomTtlMs: 7200000,
   snapshotHz: 15, movementHz: 15, maxRounds: 5, maxPlacements: 20,
-  ackMs: 8000, maxNameLength: 20,
+  ackMs: 8000, maxNameLength: 20, previewHz: 12, previewHeartbeatMs: 500, previewTtlMs: 1800,
 } as const;
+export const PLAYER_COLORS = ['#ffb66d', '#72ddeb', '#c4a2ff', '#9ae0a5'] as const;
 export interface OnlinePlayer {
   playerId: string; displayName: string; photoUrl: string | null; characterId: CharacterId;
   ready: boolean; connected: boolean; left: boolean; buildDone: boolean; seat: number;
@@ -37,16 +39,33 @@ export type RoomReply = { ok: true; room: OnlineRoom | null } | { ok: false; cod
 export interface Movement {
   round: number; sequence: number; x: number; y: number; velocityX: number; velocityY: number;
 }
-export interface NetworkPlayer extends Movement { playerId: string; finished: boolean }
-export interface MovementSnapshot { roomId: string; round: number; sequence: number; serverTime: number; players: NetworkPlayer[] }
+export interface RaceControls extends PlayerControls { round: number }
+export interface NetworkPlayer extends PhysicsPlayer { round: number }
+export interface NetworkImpact extends PlayerImpact { id: string; tick: number }
+export interface MovementSnapshot { roomId: string; round: number; sequence: number; serverTime: number; tick: number; players: NetworkPlayer[]; impacts: NetworkImpact[] }
+export interface BuildPreviewInput { round: number; sequence: number; objectType: 'basic-platform'; position: Point | null }
+export interface BuildPreview {
+  playerId: string; displayName: string; seat: number; sequence: number; objectType: 'basic-platform';
+  position: Point; valid: boolean; reason: string | null; expiresAt: number;
+}
+export interface PreviewSnapshot { roomId: string; round: number; sequence: number; serverTime: number; previews: BuildPreview[] }
+export function buildPlayerStatus(room: OnlineRoom, player: OnlinePlayer, previews: readonly BuildPreview[]): string {
+  if (!player.connected) return 'ОТКЛЮЧЁН';
+  if (room.match.placements.some(p => p.ownerId === player.playerId && p.round === room.match.round)) return 'ПОСТАВИЛ БЛОК';
+  if (player.buildDone) return 'ПРОПУСТИЛ';
+  return previews.some(p => p.playerId === player.playerId) ? 'ВЫБИРАЕТ МЕСТО' : 'ВЫБИРАЕТ БЛОК';
+}
 export interface ClientEvents {
   'room:command': (command: RoomCommand, ack: (reply: RoomReply) => void) => void;
   'race:move': (movement: Movement) => void;
+  'race:input': (input: RaceControls) => void;
+  'build:preview': (preview: BuildPreviewInput) => void;
 }
 export interface ServerEvents {
   'room:snapshot': (room: OnlineRoom) => void;
   'race:snapshot': (snapshot: MovementSnapshot) => void;
   'race:correction': (player: NetworkPlayer) => void;
+  'build:previews': (snapshot: PreviewSnapshot) => void;
   'session:error': (error: { code: string; message: string }) => void;
 }
 export function buildMiniAppLink(botUsername: string, startParam = 'home'): string {

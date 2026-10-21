@@ -49,6 +49,7 @@ export function createWinterTextures(scene: Phaser.Scene, id: CharacterId, inclu
       g.fillStyle(colors.coat).fillRect(x + 3, 12, 10, 8).fillRect(x + 3, 3, 10, 4).fillRect(x + 5, 1, 6, 3);
       g.fillStyle(0xf4cb9e).fillRect(x + 4, 7, 8, 6); g.fillStyle(0x20364e).fillRect(x + 9, 8, 2, 2);
       g.fillStyle(colors.scarf).fillRect(x + 2, 12, 12, 2).fillRect(x + 1, 13, 3, 5);
+      if (id === 'ayazhan') g.fillStyle(colors.scarf).fillRect(x + 3, 5, 10, 2).fillRect(x + 6, 0, 4, 2);
       g.fillStyle(0x24364d).fillRect(x + 3 + leg, 20, 4, 4).fillRect(x + 9 - leg, 20, 4, 4);
       g.fillStyle(0xeaf4eb).fillRect(x + 3 + leg, 23, 4, 1).fillRect(x + 9 - leg, 23, 4, 1);
     }

@@ -18,7 +18,7 @@ export function App() {
   const [partyEntry, setPartyEntry] = useState<'create' | 'join' | 'menu'>(inviteCode ? 'join' : 'menu');
   const partyBack = useRef<(() => void) | null>(null);
   const openParty = (entry: 'create' | 'join' | 'menu') => { setPartyEntry(entry); setScreen('party'); };
-  const [localCharacter, setLocalCharacter] = useState<CharacterId>('altoha');
+  const [trainingCharacter, setTrainingCharacter] = useState<CharacterId | null>(null);
   const [match, setMatch] = useState(0);
   const [lessMotion, setLessMotion] = useState(false);
   const [systemMotion, setSystemMotion] = useState(() => matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -26,7 +26,8 @@ export function App() {
   const auth = usePlayerAuth(webApp?.initData);
   const profile = auth.state.status === 'authenticated' ? auth.state.profile : undefined;
   const selected = getCharacter(profile?.progress.selectedCharacterId);
-  const characterId = selected && profile?.progress.unlockedCharacterIds.includes(selected.id) ? selected.id : localCharacter;
+  const localCharacter = trainingCharacter ?? (selected && profile?.progress.unlockedCharacterIds.includes(selected.id) ? selected.id : 'altoha');
+  const characterId = localCharacter;
   const train = () => { setMatch(v => v + 1); setScreen('arena'); };
   useEffect(() => initializeTelegram(webApp), [webApp]);
   useEffect(() => {
@@ -56,11 +57,11 @@ export function App() {
           <p className="menu-note">Горячий донер. Холодный расчёт.</p>
         </nav>}
 
-        {screen === 'characters' && <CharacterSelect progress={profile?.progress} localCharacter={localCharacter} pending={auth.pendingCharacter} error={auth.actionError} onSelect={id => void auth.changeCharacter('select', id)} onLocalSelect={setLocalCharacter} onPlay={train} />}
+        {screen === 'characters' && <CharacterSelect progress={profile?.progress} localCharacter={localCharacter} pending={auth.pendingCharacter} error={auth.actionError} onSelect={id => void auth.changeCharacter('select', id)} onLocalSelect={setTrainingCharacter} onPlay={train} />}
         {screen === 'profile' && <section className="info-panel pixel-panel"><h2>ТВОЯ ПАРТИЯ ВПЕРЕДИ</h2><p>Doner станут валютой ловушек и препятствий. Баланс аккаунта сохранён.</p><p className="hint">Тренировка не выдаёт награды. Магазин появится позже.</p><button className="button-secondary" onClick={() => setScreen('characters')}>ВЫБРАТЬ ПЕРСОНАЖА</button></section>}
         {screen === 'how' && <section className="info-panel pixel-panel"><h2>ПОСТРОЙ → БЕГИ → ПОВТОРИ</h2><ol><li>Создай комнату и пригласи 1–3 друзей ссылкой или кодом. Выберите героев, нажмите ГОТОВ; host начнёт матч.</li><li>В BUILD каждый ставит один бесплатный блок или пропускает ход. Зелёный preview — можно ставить.</li><li>Когда все готовы или время вышло, начинается общий RACE. Беги к клетчатому финишу, прыгай через уступы.</li><li>После общих RESULTS host запускает следующий раунд. Все прежние блоки остаются.</li></ol><p>До 5 раундов. BUILD — 60 секунд, RACE — 90 секунд. Пауза останавливает только твоё управление.</p><p className="hint">Doner не меняются. Для игры без аккаунта доступна локальная тренировка; её карта сбрасывается при выходе в меню.</p><button className="pixel-button" onClick={train}>ПОПРОБОВАТЬ В ТРЕНИРОВКЕ</button></section>}
         {screen === 'settings' && <section className="info-panel pixel-panel"><h2>УЮТНЫЙ РЕЖИМ</h2><label className="setting"><input type="checkbox" checked={reducedMotion} disabled={systemMotion} onChange={e => setLessMotion(e.target.checked)} />Уменьшить анимацию</label><p className="hint">{systemMotion ? 'Включено настройкой вашего устройства.' : 'Убирает движение снега и мерцание огней.'}</p><p>Управление: стрелки / A, D и Space / W. На телефоне — кнопки под ареной.</p><p className="hint">В этом прототипе звука пока нет.</p></section>}
       </>}
-    </main><footer className="footer">v0.6.1 Real Multiplayer Prototype</footer>
+    </main><footer className="footer">v0.6.1.5 Player Interactions + Ayazhan</footer>
   </div>;
 }

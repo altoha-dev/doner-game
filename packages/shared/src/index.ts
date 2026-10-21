@@ -42,3 +42,4 @@ export interface ApiErrorDto {
 }
 
 export * from './online.js';
+export * from './physics.js';

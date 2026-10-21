@@ -1,10 +1,10 @@
-import { overlaps, SNOWY_CHAOS } from '@doner-game/shared';
+import { createPhysicsPlayer, overlaps, playerBody, SNOWY_CHAOS } from '@doner-game/shared';
 import type { Movement, NetworkPlayer, Rect } from '@doner-game/shared';
 
 export interface MovementHistory { state: NetworkPlayer; acceptedAt: number; raceStart: number; distance: number; groundY: number; airSince: number | null }
 export function initialMovement(playerId: string, seat: number, round: number, now: number): MovementHistory {
   const spawn = SNOWY_CHAOS.spawns[seat] ?? SNOWY_CHAOS.spawns[0]!;
-  return { state: { playerId, round, sequence: 0, x: spawn.x, y: spawn.y, velocityX: 0, velocityY: 0, finished: false }, acceptedAt: now, raceStart: now, distance: 0, groundY: spawn.y, airSince: null };
+  return { state: { ...createPhysicsPlayer(playerId, seat, spawn.x, spawn.y), round }, acceptedAt: now, raceStart: now, distance: 0, groundY: spawn.y, airSince: null };
 }
 export function validateMovement(history: MovementHistory, move: Movement, solids: readonly Rect[], now: number): boolean {
   const previous = history.state;
@@ -35,9 +35,9 @@ export function validateMovement(history: MovementHistory, move: Movement, solid
   history.groundY = groundY; history.airSince = airSince;
   history.distance += dx; history.acceptedAt = now;
   if (support) { history.groundY = move.y; history.airSince = null; } else history.airSince ??= now;
-  history.state = { ...move, playerId: previous.playerId, finished: false };
+  history.state = { ...previous, ...move, finished: false };
   return true;
 }
 export function atFinish(move: Movement): boolean {
-  return overlaps({ x: move.x - 5, y: move.y - 21, width: 10, height: 21 }, SNOWY_CHAOS.finish);
+  return overlaps(playerBody(move), SNOWY_CHAOS.finish);
 }

@@ -74,7 +74,7 @@ svg,img { image-rendering: pixelated; }
 .character-select { display: flex; flex-direction: column; gap: 18px; }
 .character-list { display: grid; gap: 12px; }
 .character-card { padding: 14px; display: grid; grid-template-columns: 48px 1fr; gap: 12px; align-items: center; }
-.character-card h2 { font: 800 20px var(--font-mono); }
+.character-card h2 { font: 800 20px var(--font-mono); text-transform: uppercase; }
 .character-card p { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
 .character-card button { grid-column: 1 / -1; }
 .character-card.is-selected { border-color: #a6dbbf; background: #28444f; }

@@ -7,7 +7,7 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import { RoomError, RoomManager } from './manager.js';
 import type { RoomTiming } from './manager.js';
 import { roomStore } from './store.js';
-import { parseCommand, parseMovement, RateGate } from './validation.js';
+import { parseCommand, parsePreview, parseRaceControls, RateGate } from './validation.js';
 interface SocketData { profile: PlayerProfileDto; expiresAt: number }
 
 export async function attachMultiplayer(app: FastifyInstance, config: ApiConfig, players: PlayerStore, db: PrismaClient, timing?: RoomTiming) {
@@ -23,6 +23,7 @@ export async function attachMultiplayer(app: FastifyInstance, config: ApiConfig,
   const users = new Map<string, string>();
   manager.onSnapshot = room => io.to(room.roomId).emit('room:snapshot', room);
   manager.onMovement = snapshot => io.to(snapshot.roomId).volatile.emit('race:snapshot', snapshot);
+  manager.onPreviews = snapshot => io.to(snapshot.roomId).emit('build:previews', snapshot);
   io.use(async (socket, next) => {
     if (!gate.take(`connect:${socket.handshake.address}`, 60, 60000)) return next(new Error('RATE_LIMITED'));
     try {
@@ -46,7 +47,11 @@ export async function attachMultiplayer(app: FastifyInstance, config: ApiConfig,
     }, Math.max(1, socket.data.expiresAt - Date.now())); expiry.unref();
     const ready = manager.connected(profile).then(async room => {
       if (!socket.connected || users.get(userId) !== socket.id) return;
-      if (room) { await socket.join(room.roomId); socket.emit('room:snapshot', room); const motion = manager.movementSnapshot(userId); if (motion) socket.emit('race:snapshot', motion); }
+      if (room) {
+        await socket.join(room.roomId); socket.emit('room:snapshot', room);
+        const motion = manager.movementSnapshot(userId); if (motion) socket.emit('race:snapshot', motion);
+        const previews = manager.previewSnapshot(userId); if (previews) socket.emit('build:previews', previews);
+      }
     });
     void ready.catch(() => { socket.emit('session:error', { code: 'SERVER_ERROR', message: 'Не удалось восстановить комнату. Повторите подключение.' }); socket.disconnect(true); });
     socket.on('room:command', (raw, ack) => {
@@ -61,15 +66,19 @@ export async function attachMultiplayer(app: FastifyInstance, config: ApiConfig,
         if (before && (!room || room.roomId !== before.roomId)) await socket.leave(before.roomId);
         if (room) await socket.join(room.roomId);
         ack({ ok: true, room });
+        const previews = manager.previewSnapshot(userId); if (previews) socket.emit('build:previews', previews);
       })().catch((error: unknown) => {
         if (error instanceof RoomError) ack({ ok: false, code: error.code, message: error.message });
         else { app.log.error({ code: 'ROOM_ACTION_FAILED' }, 'Room action failed'); ack({ ok: false, code: 'SERVER_ERROR', message: 'Не удалось подтвердить действие. Повторите запрос.' }); }
       });
     });
-    socket.on('race:move', raw => {
+    socket.on('race:input', raw => {
       if (users.get(userId) !== socket.id || Date.now() >= socket.data.expiresAt || !gate.take(`move:${userId}`, 35, 1000)) return;
-      const move = parseMovement(raw); if (!move) return;
-      const correction = manager.movement(userId, move); if (correction) socket.emit('race:correction', correction);
+      const value = parseRaceControls(raw); if (value) manager.input(userId, value);
+    });
+    socket.on('build:preview', raw => {
+      if (users.get(userId) !== socket.id || Date.now() >= socket.data.expiresAt || !gate.take(`preview:${userId}`, 16, 1000)) return;
+      const value = parsePreview(raw); if (value) manager.preview(userId, value);
     });
     socket.on('disconnect', () => {
       clearTimeout(expiry);

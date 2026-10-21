@@ -1,8 +1,10 @@
-# DONER GAME — v0.6.1 Real Multiplayer Prototype
+# DONER GAME — v0.6.1.5 Player Interactions + Ayazhan
 
-Telegram Mini App + Bot. **Winter Party Edition** — multiplayer party platformer на одной общей карте. Stage 6.1 добавляет реальные комнаты 2–4 игроков: LOBBY → общий BUILD → RACE → одинаковые RESULTS → NEXT с сохранением блоков. Локальная тренировка сохранена. Магазина, abilities, rewards и изменений Doner нет.
+Telegram Mini App + Bot. **Winter Party Edition** — multiplayer party platformer на одной общей карте для 2–4 друзей: LOBBY → общий BUILD → RACE → одинаковые RESULTS → NEXT с сохранением блоков. Stage 6.1.5 добавляет серверные контакты игроков, толкание, прыжки с головы, live previews строительства и четвёртого персонажа Аяжан. Локальная тренировка сохранена. Магазина, abilities, rewards и изменений Doner нет.
 
-[Отчёт Stage 6.1](docs/STAGE_6_1_REPORT.md) · [Карта прогресса](docs/STAGE_6_1_PROGRESS.md) · [Deployment и тест с другом](docs/TELEGRAM_MULTIPLAYER_TEST_PLAN.md) · [Исторический отчёт Stage 6.0](docs/STAGE_6_REPORT.md).
+[Отчёт и проверка на двух телефонах](docs/STAGE_6_1_5_REPORT.md) · [Прогресс Stage 6.1.5](docs/STAGE_6_1_5_PROGRESS.md) · [Deployment contract](docs/TELEGRAM_MULTIPLAYER_TEST_PLAN.md) · [Исторический отчёт Stage 6.1](docs/STAGE_6_1_REPORT.md).
+
+Версия интерфейса — `v0.6.1.5 Player Interactions + Ayazhan`; root package использует валидный SemVer `0.6.1-5` (четыре числовых компонента не являются SemVer).
 
 ## Попробовать
 
@@ -20,6 +22,8 @@ pnpm dev:web
 
 Для комнат нужен настоящий Telegram auth. Создатель выбирает capacity, делится кодом/ссылкой; друг подтверждает вход, оба выбирают любого героя и нажимают ГОТОВ. Host запускает матч. По одному бесплатному блоку или SKIP; BUILD 60s, RACE 90s, до 5 раундов. Без Telegram доступна тренировка, fake-auth endpoint в production отсутствует.
 
+Altoha, Aigerim, Temik и Аяжан доступны в комнате и тренировке бесплатно, с одинаковой физикой. Можно выбрать одинаковых героев. Аяжан — оригинальный временный пиксельный образ в сиренево-голубой одежде; способности TBD. В BUILD видны цвет/имя владельца движущегося preview и ✓/× допустимости. В RACE можно толкать друзей, стоять на голове и прыгать с неё.
+
 ## Архитектура
 
 ```text
@@ -29,6 +33,7 @@ apps/web/src/
   PlayerPanel.tsx                 Telegram identity/avatar, Doner, выбранный герой
   PartyScreen.tsx, party.css      create/join, lobby, invite, ready, reconnect
   multiplayer/connection.ts      typed Socket.IO client, snapshot store/session adapter
+  multiplayer/prediction.ts      shared solver prediction и replay после server snapshots
   GameScreen.tsx                  BUILD/RACE/RESULTS UI, input и lifecycle
   game/localSession.ts            immutable состояние локального матча
   game/createGame.ts              Phaser, collisions, camera, phase presentation
@@ -41,19 +46,22 @@ packages/shared/src/
   arena.ts                       единая geometry/spawns/finish/placement areas
   party.ts                       contracts, placement validation, future rules
   online.ts                      socket events, room snapshots, online rules, invite helper
+  physics.ts                     fixed-step AABB solver и общая PLAYER_PHYSICS config
   characters.ts, index.ts         стабильные IDs, существующие account DTO
-apps/api/src/multiplayer/        Socket.IO, RoomManager, store, movement/payload validation
+apps/api/src/multiplayer/        Socket.IO, RoomManager, store, race simulation, ephemeral previews
 apps/api/                        существующие Fastify/auth/Prisma/PostgreSQL + additive rooms
 apps/bot/                        существующие grammY /start /help /game
 ```
 
-`selectedCharacterId` выбирает только героя. `SNOWY_CHAOS` и MatchSnapshot общие. Geometry, visual tiles, spawn, finish и placement areas разделены. Один Phaser engine работает с local session или server snapshot adapter. Server owns membership/phase/placements/results; физика локальная с серверной проверкой допустимости движения. Подробности: [game design](docs/GAME_DESIGN.md), [multiplayer architecture](docs/MULTIPLAYER_ARCHITECTURE.md), [art direction](docs/ART_DIRECTION.md).
+`selectedCharacterId` выбирает только героя. `SNOWY_CHAOS` и MatchSnapshot общие. Geometry, visual tiles, spawn, finish и placement areas разделены. Один Phaser engine работает с local session или server snapshot adapter. Online сервер считает физику 60 Hz, принимает input 20 Hz и рассылает snapshots 15 Hz; клиент использует prediction/reconciliation и remote interpolation. Training сохраняет Arcade physics. Previews до 12 Hz, ephemeral и room-only, без DB writes. Подробности: [game design](docs/GAME_DESIGN.md), [multiplayer architecture](docs/MULTIPLAYER_ARCHITECTURE.md), [art direction](docs/ART_DIRECTION.md).
 
 ## Аккаунт и database safety
 
 Сохранены Telegram initData HMAC → JWT → GET /me, Telegram user ID, имя/username/avatar, account connection/error/retry, selected character и balances. JWT остаётся только в памяти. initDataUnsafe не подтверждает личность. Старые startapp=solo не открывают удалённый Campaign.
 
 User, PlayerProgress, UnlockedCharacter сохранены, включая campaignStage/goldenDoners и совместимый unlock endpoint. Additive migration `20261020000000_party_rooms` создаёт Room, RoomPlayer, MatchRound, TrapPlacement, RoundFinish. Старые migrations не менялись. Multiplayer не пишет в баланс/ownership; room character selection не вызывает profile purchase/select endpoints.
+
+Stage 6.1.5 не добавляет migrations/env. `ayazhan` валидируется shared catalog и хранится существующим строковым chosenCharacterId. Выбор для тренировки не требует ownership; legacy profile selection API вызывается только для уже открытых персонажей, сохранённые selections не сбрасываются.
 
 ## Environment
 
@@ -110,7 +118,7 @@ Rate limit хранится в памяти одного процесса, бе�
 
 ## Существующий hosting contract
 
-Production configuration и variables не менялись. Deploy/push/reset/production migrations не выполнялись; новая migration проверена только в изолированной локальной тестовой БД.
+Production configuration и variables не менялись. Deploy/push/reset/production migrations не выполнялись; в 6.1.5 новых migrations нет, существующие проверены на изолированной локальной тестовой БД.
 
 | Сервис | Сохранённые параметры |
 | --- | --- |
@@ -122,7 +130,7 @@ Production configuration и variables не менялись. Deploy/push/reset/p
 
 Для Telegram нужны HTTPS web/API и точный CORS origin. Socket.IO использует тот же API domain/PORT; нового realtime service нет. Нужен один активный API instance, включая обновления: нет distributed ownership/leader lease. Для обновления после 6.1 остановить прежний API до старта нового, с коротким обслуживанием и безопасным abort активной гонки. Подробнее в [deployment plan](docs/TELEGRAM_MULTIPLAYER_TEST_PLAN.md).
 
-Ручной smoke на двух телефонах остаётся после отдельно разрешённого deployment. Multiplayer browser QA использует fixture Telegram SDK, **настоящие HTTP auth/JWT/Socket.IO/API/PostgreSQL** и двух разных fixture users. Только training browser QA подменяет HTTP ответы.
+Ручной smoke на двух телефонах остаётся после отдельно разрешённого deployment. Multiplayer browser QA использует fixture Telegram SDK, **настоящие HTTP auth/JWT/Socket.IO/API/PostgreSQL** и 2–4 разных fixture users. Только training browser QA подменяет HTTP ответы. Протокол input несовместим со старым frontend 6.1: обновить API/frontend согласованно и перезагрузить открытые Mini Apps.
 
 ## Проверки
 
@@ -154,9 +162,11 @@ TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm test
 VITE_API_URL=http://127.0.0.1:3014 pnpm --filter @doner-game/web dev --port 5186
 # Пока Vite работает:
 TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @doner-game/web test:party
+# Последовательно, после предыдущего сценария:
+TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @doner-game/web test:interactions
 ```
 
-Browser script запускает fixture API 3014 через IPC, создаёт двух пользователей и подписанные test initData, затем удаляет свои записи и останавливает API. Fixture требует loopback `*_test` DB, не загружает `.env`; production fake-auth route не создаётся. Не запускайте одновременно два RoomManager/API integration против одной test DB.
+Browser script запускает fixture API 3014 через IPC, создаёт пользователей и подписанные test initData, затем удаляет свои записи и останавливает API. Fixture требует loopback `*_test` DB, не загружает `.env`; production fake-auth route не создаётся. Не запускайте одновременно два RoomManager/API integration против одной test DB. `test:interactions` использует dev diagnostics: четыре contexts, 120ms added RTT у B, push/head contacts, live previews, реальный offline/reconnect в BUILD/RACE, четыре персонажа и NEXT; artifacts в `artifacts/stage-6.1.5/`. FPS headless Chromium не является замером телефона.
 
 Для локальной проверки production frontend: `VITE_API_URL=http://127.0.0.1:3014 pnpm build`, `pnpm --filter @doner-game/web preview --port 4186`, затем `BROWSER_TEST_URL=http://127.0.0.1:4186 BROWSER_TEST_PRODUCTION=1 TEST_DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @doner-game/web test:party`. Это локальный preview, не deployment. Screenshots — `artifacts/stage-6.1/`.
 
@@ -172,6 +182,6 @@ Browser script запускает fixture API 3014 через IPC, создаё�
 
 ## Ограничения
 
-Один активный API instance; сервер проверяет правдоподобность координат, но не симулирует полную physics. Нет latency compensation, распределённого room ownership, load tests, abilities/rewards/магазина/death/respawn. Сложное размещение может перекрыть маршрут; global path validation отсутствует. Спрайты временные. Phaser lazy chunk превышает предупреждение Vite 500 kB.
+Один активный API instance; online physics — небольшой authoritative AABB solver, без rollback/lag compensation. Prediction ограничен 12 шагами, server catch-up — 6; большая задержка/jitter может вызвать заметную коррекцию. После 300ms без input тело не блокирует друзей. Нет распределённого room ownership, load tests, abilities/rewards/магазина/death/respawn. Сложное размещение может перекрыть маршрут; global path validation отсутствует. Спрайты временные. Phaser lazy chunk превышает предупреждение Vite 500 kB.
 
 Реальные телефоны/Telegram accounts ещё требуют ручной проверки. Stage 6.2 не начинался.

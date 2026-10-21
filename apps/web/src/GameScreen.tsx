@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { getCharacter, ONLINE_RULES, PARTY_RULES, placementError, snapToGrid } from '@doner-game/shared';
-import type { ArenaSession, CharacterId, OnlineRoom, Point } from '@doner-game/shared';
+import { buildPlayerStatus, getCharacter, ONLINE_RULES, PARTY_RULES, placementError, PLAYER_COLORS, snapToGrid } from '@doner-game/shared';
+import type { ArenaSession, BuildPreview, CharacterId, OnlineRoom, Point } from '@doner-game/shared';
 import { CharacterPortrait } from './PixelArt';
 import type { GameRuntime } from './game/createGame';
 import { GameInput, KEY_ACTIONS } from './game/input';
@@ -12,7 +12,7 @@ import { createLocalSession } from './game/localSession';
 import type { RoomConnection } from './multiplayer/connection';
 import './game.css';
 
-export interface OnlineGame { room: OnlineRoom; connection: RoomConnection; connected: boolean; pending: boolean }
+export interface OnlineGame { room: OnlineRoom; connection: RoomConnection; connected: boolean; pending: boolean; previews: readonly BuildPreview[] }
 export function GameScreen({ characterId, onBack, onNewMatch, reducedMotion, externalSession, online }: { characterId: CharacterId; onBack(): void; onNewMatch(): void; reducedMotion: boolean; externalSession?: ArenaSession; online?: OnlineGame }) {
   const host = useRef<HTMLDivElement>(null);
   const runtime = useRef<GameRuntime | null>(null);
@@ -54,6 +54,9 @@ export function GameScreen({ characterId, onBack, onNewMatch, reducedMotion, ext
   useEffect(() => { runtime.current?.applySnapshot(state); }, [state]);
   useEffect(() => { input.clear(); setPaused(false); setPreview(null); setNotice(''); }, [state.phase, state.round, input]);
   useEffect(() => { if (placedThisRound) setPreview(null); }, [placedThisRound]);
+  useEffect(() => { if (offline) setPreview(null); }, [offline]);
+  useEffect(() => { network?.setPreview(build && !placedThisRound && !offline ? preview : null); }, [network, build, placedThisRound, offline, preview]);
+  useEffect(() => () => network?.setPreview(null), [network]);
   useEffect(() => { runtime.current?.setBuildView(camera, preview, !error); }, [camera, preview, error, status, state.phase]);
   useEffect(() => { input.clear(); runtime.current?.setPaused(paused || offline || ownFinished); }, [paused, offline, ownFinished, status, input]);
   useEffect(() => {
@@ -98,6 +101,7 @@ export function GameScreen({ characterId, onBack, onNewMatch, reducedMotion, ext
       {(state.phase === 'RESULTS' || state.phase === 'MATCH_FINISHED') && <div className="game-overlay results" role="status"><span className="eyebrow">{online ? "ОБЩИЙ РЕЗУЛЬТАТ" : "ЛОКАЛЬНЫЙ РЕЗУЛЬТАТ"}</span><h2>{state.phase === 'RESULTS' ? 'ФИНИШ!' : online ? 'МАТЧ ЗАВЕРШЁН' : 'ОТЛИЧНАЯ ТРЕНИРОВКА'}</h2>{!online && <b>{((finish?.elapsedMs ?? 0) / 1000).toFixed(1)} сек</b>}<p>Doner не начисляются.<br />{state.phase === 'MATCH_FINISHED' ? 'Новая игра начнётся с пустой карты.' : state.round === (online ? ONLINE_RULES.maxRounds : PARTY_RULES.localRoundLimit) ? 'Это последний раунд матча.' : 'Блоки останутся в следующем раунде.'}</p></div>}
     </div>
     {build && <div className="build-ui">
+      {online && <div className="build-party-status" aria-label={`Строительство — раунд ${state.round}`}><b>СТРОИТЕЛЬСТВО · РАУНД {state.round}</b><ul>{online.room.players.filter(p => !p.left).map(p => <li key={p.playerId}><span style={{ color: PLAYER_COLORS[p.seat] }}>{p.displayName}</span><strong>{buildPlayerStatus(online.room, p, online.previews)}</strong></li>)}</ul></div>}
       <label className="map-scroll">ОБЗОР КАРТЫ <span>СТАРТ → ФИНИШ</span><input aria-label="Обзор карты" type="range" min={80} max={1072} step={16} value={camera} onChange={e => setCamera(Number(e.target.value))} /></label>
       {!placedThisRound && !preview && <button className="block-picker pixel-button button-secondary" disabled={offline || waiting || status !== 'ready'} onClick={() => { setPreview({ x: 176, y: 240 }); setCamera(192); }}><span className="block-swatch" />ПЛАТФОРМА <small>1 БЕСПЛАТНО</small></button>}
       {preview && !placedThisRound && <>
@@ -108,7 +112,7 @@ export function GameScreen({ characterId, onBack, onNewMatch, reducedMotion, ext
       {placedThisRound && !online && <button className="pixel-button" onClick={() => session.dispatch({ type: 'START_RACE' })}>НАЧАТЬ ЗАБЕГ →</button>}
       {online && !placedThisRound && <button className="text-button" disabled={offline || waiting} onClick={() => void online.connection.request({ type: 'SKIP', round: state.round })}>ПРОПУСТИТЬ РАЗМЕЩЕНИЕ</button>}
       {online && placedThisRound && <p className="game-hint">Ход готов. Ждём друзей: {online.room.players.filter(p => !p.left && p.buildDone).length}/{online.room.players.filter(p => !p.left).length}</p>}
-      <p className="game-hint">{placedThisRound ? 'Блок готов. Пора проверить трассу!' : preview ? 'Коснись карты или используй стрелки. Красный — нельзя.' : 'Добавь одну платформу. Старые блоки остаются.'}</p>
+      <p className="game-hint">{placedThisRound ? online ? 'Твой ход завершён. Ждём остальных.' : 'Блок готов. Пора проверить трассу!' : preview ? 'Коснись карты или используй стрелки. Красный — нельзя.' : 'Добавь одну платформу. Старые блоки остаются.'}</p>
       {notice && <p role="alert">{notice}</p>}
     </div>}
     {race && <><div className="game-controls"><div>{control('left', 'Влево', '◀')}{control('right', 'Вправо', '▶')}</div>{control('jump', 'Прыжок', '↑')}</div><p className="game-hint">{ownFinished ? "Ваш забег завершён. Ждём остальных…" : "Доберись до клетчатого финиша!"}</p><p className="game-keyboard-hint">A / D · W / Space · P — пауза</p></>}

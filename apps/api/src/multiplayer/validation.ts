@@ -1,5 +1,5 @@
 import { getCharacter } from '@doner-game/shared';
-import type { Movement, RoomCommand } from '@doner-game/shared';
+import type { BuildPreviewInput, Movement, RaceControls, RoomCommand } from '@doner-game/shared';
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const keys = (v: Record<string, unknown>, allowed: string[]) => Object.keys(v).every(k => allowed.includes(k));
 const integer = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v < 1000000000;
@@ -21,6 +21,17 @@ export function parseMovement(value: unknown): Movement | null {
   if (!record(value) || !keys(value, ['round', 'sequence', 'x', 'y', 'velocityX', 'velocityY'])) return null;
   if (!integer(value.round) || !integer(value.sequence) || !['x', 'y', 'velocityX', 'velocityY'].every(k => typeof value[k] === 'number' && Number.isFinite(value[k]))) return null;
   return value as unknown as Movement;
+}
+export function parseRaceControls(value: unknown): RaceControls | null {
+  if (!record(value) || !keys(value, ['round', 'sequence', 'direction', 'jump'])) return null;
+  if (!integer(value.round) || !integer(value.sequence) || !integer(value.jump) || Number(value.jump) > Number(value.sequence) || ![-1, 0, 1].includes(value.direction as number)) return null;
+  return value as unknown as RaceControls;
+}
+export function parsePreview(value: unknown): BuildPreviewInput | null {
+  if (!record(value) || !keys(value, ['round', 'sequence', 'objectType', 'position']) || !integer(value.round) || !integer(value.sequence) || value.objectType !== 'basic-platform') return null;
+  const position = value.position;
+  if (position !== null && (!record(position) || !keys(position, ['x', 'y']) || !['x', 'y'].every(k => typeof position[k] === 'number' && Number.isFinite(position[k]) && Math.abs(position[k]) <= 4096))) return null;
+  return value as unknown as BuildPreviewInput;
 }
 export class RateGate {
   private buckets = new Map<string, { count: number; until: number }>();

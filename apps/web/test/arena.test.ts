@@ -3,10 +3,13 @@ import test from 'node:test';
 import { placementError, snapToGrid, PARTY_RULES, proposedFinishReward, CHARACTERS } from '@doner-game/shared';
 import { SNOWY_CHAOS, MOVEMENT } from '../src/game/level.ts';
 import { createLocalSession } from '../src/game/localSession.ts';
-import { getPlayerVisual } from '../src/game/playerVisual.ts';
+import { CHARACTER_COLORS, getPlayerVisual } from '../src/game/playerVisual.ts';
 
 test('all character visuals use the same arena and physical footprint', () => {
   for (const character of CHARACTERS) assert.deepEqual(getPlayerVisual(character.id).body, getPlayerVisual('altoha').body);
+  assert.equal(new Set(CHARACTERS.map(c => getPlayerVisual(c.id).texture)).size, 4);
+  assert.equal(new Set(CHARACTERS.map(c => CHARACTER_COLORS[c.id].coat)).size, 4);
+  assert.deepEqual(getPlayerVisual('ayazhan').run, getPlayerVisual('altoha').run);
   assert.equal(SNOWY_CHAOS.id, 'snowy-chaos'); assert.equal(SNOWY_CHAOS.spawns.length, 4);
   const jumpHeight = MOVEMENT.jump ** 2 / (2 * MOVEMENT.gravity);
   for (const obstacle of SNOWY_CHAOS.geometry.slice(1)) assert.ok(272 - obstacle.y < jumpHeight);

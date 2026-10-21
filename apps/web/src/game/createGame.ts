@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
-import { CHARACTERS, ONLINE_RULES } from '@doner-game/shared';
-import type { NetworkPlayer } from '@doner-game/shared';
+import { CHARACTERS, PLAYER_COLORS, PLAYER_PHYSICS } from '@doner-game/shared';
+import type { BuildPreview, MovementSnapshot, NetworkImpact, NetworkPlayer, RaceControls } from '@doner-game/shared';
 import type { NetworkBridge } from '../multiplayer/connection';
+import { RacePrediction } from '../multiplayer/prediction';
 import type { ArenaDefinition, CharacterId, MatchSnapshot, Point } from '@doner-game/shared';
 import type { GameInput } from './input';
 import { MOVEMENT } from './level';
@@ -38,11 +39,18 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
     private jumpAt = -Infinity;
     private elapsedMs = 0;
     private reachedGoal = false;
-    private movementSequence = 0;
+    private prediction = network ? new RacePrediction(network.localId, arena) : null;
+    private accumulator = 0;
+    private offset = { x: 0, y: 0 };
     private sentAt = -Infinity;
     private ownLabel?: Phaser.GameObjects.Text;
     private remote = new Map<string, { sprite: Phaser.GameObjects.Sprite; label: Phaser.GameObjects.Text; target: NetworkPlayer | null; fromX: number; fromY: number; receivedAt: number }>();
     private cancelNetwork: (() => void)[] = [];
+    private previews = new Map<string, { graphic: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text; value: BuildPreview; fromX: number; fromY: number; at: number }>();
+    private impacts!: Phaser.GameObjects.Graphics;
+    private seenImpacts = new Set<string>();
+    private particles: { impact: NetworkImpact; at: number }[] = [];
+    private frameTimes: number[] = [];
     preload() { if (visual.sheet) this.load.spritesheet(visual.texture, visual.sheet.url, visual.sheet); }
     create() {
       if (disposed) return;
@@ -53,7 +61,7 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       for (const rect of arena.geometry) this.solids.add(this.add.rectangle(rect.x, rect.y, rect.width, rect.height, 0, 0).setOrigin(0));
       this.player = this.physics.add.sprite(spawn().x, spawn().y, visual.texture, visual.idle[0]).setOrigin(visual.origin.x, visual.origin.y).setDepth(5);
       this.player.setSize(visual.body.width, visual.body.height).setOffset(visual.body.offsetX, visual.body.offsetY).setCollideWorldBounds(true);
-      this.player.setMaxVelocity(MOVEMENT.speed, 420).setDragX(MOVEMENT.drag);
+      this.player.setMaxVelocity(MOVEMENT.speed, MOVEMENT.maxFall).setDragX(MOVEMENT.drag);
       this.physics.world.setBounds(0, 0, arena.width, arena.height);
       this.physics.add.collider(this.player, this.solids);
       this.cameras.main.setBounds(0, 0, arena.width, arena.height).setDeadzone(32, 32);
@@ -63,16 +71,12 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       for (let y = 176; y <= 272; y += arena.grid) this.grid.lineBetween(0, y, arena.width, y);
       for (const a of arena.protectedAreas) this.grid.fillStyle(0xf68b83, .09).fillRect(a.x, 176, a.width, 96);
       this.ghost = this.add.graphics().setDepth(6);
+      this.impacts = this.add.graphics().setDepth(8);
       this.apply(); this.resize();
       if (network) {
-        this.cancelNetwork.push(network.subscribeMovement(value => {
-          for (const player of value.players) {
-            const actor = this.remote.get(player.playerId);
-            if (actor) { actor.fromX = actor.sprite.x; actor.fromY = actor.sprite.y; actor.target = player; actor.receivedAt = performance.now(); }
-          }
-        }), network.subscribeCorrection(value => this.correct(value)));
-        const initial = network.getMovement()?.players.find(p => p.playerId === network.localId);
-        if (initial && snapshot.phase === 'RACE') this.correct(initial);
+        this.cancelNetwork.push(network.subscribeMovement((value, reset) => this.receiveMovement(value, reset)), network.subscribePreviews(() => this.syncPreviews()));
+        const initial = network.getMovement();
+        if (initial && snapshot.phase === 'RACE') this.receiveMovement(initial, true);
       }
       this.scale.on(Phaser.Scale.Events.RESIZE, this.resize, this);
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.scale.off(Phaser.Scale.Events.RESIZE, this.resize, this); this.cancelNetwork.forEach(cancel => cancel()); });
@@ -90,12 +94,15 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
         this.phase = snapshot.phase;
         if (snapshot.phase === 'RACE') {
           this.reachedGoal = false; this.elapsedMs = 0;
+          this.accumulator = 0; this.offset = { x: 0, y: 0 }; this.sentAt = -Infinity;
+          const room = network?.getRoom(); if (room) this.prediction?.begin(room);
           this.player.setPosition(spawn().x, spawn().y).setVelocity(0, 0).setAcceleration(0, 0);
           (this.player.body as Phaser.Physics.Arcade.Body).reset(this.player.x, this.player.y);
           this.cameras.main.startFollow(this.player, true, 1, 1);
         } else { this.cameras.main.stopFollow(); this.player.setVelocity(0, 0).setAcceleration(0, 0); }
       }
       this.syncPlayers();
+      this.syncPreviews();
       this.grid.setVisible(snapshot.phase === 'BUILD');
       this.player.setVisible(snapshot.phase !== 'BUILD');
       this.refreshPause(); this.buildView();
@@ -120,12 +127,49 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       }
       if (room.finishes.some(f => f.playerId === network.localId && f.round === snapshot.round)) { this.reachedGoal = true; this.player.setVelocity(0, 0).setAcceleration(0, 0); input.clear(); }
     }
-    correct(value: NetworkPlayer) {
-      if (!this.player || value.round !== snapshot.round) return;
-      this.movementSequence = Math.max(this.movementSequence, value.sequence);
-      this.player.setPosition(value.x, value.y);
-      (this.player.body as Phaser.Physics.Arcade.Body).reset(value.x, value.y);
-      this.player.setVelocity(value.velocityX, value.velocityY); this.reachedGoal = value.finished;
+    receiveMovement(value: MovementSnapshot, reset: boolean) {
+      if (!this.player || value.round !== snapshot.round || snapshot.phase !== 'RACE') return;
+      this.prediction?.reconcile(value, reset);
+      const me = this.prediction?.own;
+      if (me) {
+        const dx = this.player.x - me.x, dy = this.player.y - me.y;
+        const contact = this.prediction!.players.some(p => p.playerId !== me.playerId && p.active && Math.abs(p.x - me.x) < PLAYER_PHYSICS.width + 4 && Math.abs(p.y - me.y) < PLAYER_PHYSICS.height + 4);
+        this.offset = !reset && !contact && Math.hypot(dx, dy) < PLAYER_PHYSICS.correctionSnapDistance ? { x: dx, y: dy } : { x: 0, y: 0 };
+      }
+      for (const player of value.players) {
+        const actor = this.remote.get(player.playerId);
+        if (actor) { actor.fromX = actor.sprite.x; actor.fromY = actor.sprite.y; actor.target = player; actor.receivedAt = performance.now(); }
+      }
+      for (const impact of value.impacts) {
+        if (this.seenImpacts.has(impact.id)) continue;
+        this.seenImpacts.add(impact.id);
+        if (!reducedMotion) this.particles.push({ impact, at: performance.now() });
+        if (import.meta.env.DEV) host.dataset.lastImpact = impact.kind;
+      }
+      if (this.seenImpacts.size > 256) this.seenImpacts = new Set([...this.seenImpacts].slice(-128));
+    }
+    syncPreviews() {
+      if (!network || !this.ghost) return;
+      const values = snapshot.phase === 'BUILD' ? network.getPreviews().filter(p => p.playerId !== network.localId) : [];
+      for (const [id, item] of this.previews) if (!values.some(p => p.playerId === id)) { item.graphic.destroy(); item.label.destroy(); this.previews.delete(id); }
+      for (const value of values) {
+        let item = this.previews.get(value.playerId);
+        if (!item) {
+          item = { graphic: this.add.graphics().setDepth(6).setPosition(value.position.x, value.position.y),
+            label: this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '7px', backgroundColor: '#152640', padding: { x: 2, y: 1 } }).setOrigin(.5, 1).setDepth(9),
+            value, fromX: value.position.x, fromY: value.position.y, at: performance.now() };
+          this.previews.set(value.playerId, item);
+        }
+        if (item.value.position.x !== value.position.x || item.value.position.y !== value.position.y) {
+          item.fromX = item.graphic.x; item.fromY = item.graphic.y; item.at = performance.now();
+        }
+        item.value = value;
+        const ownerColor = PLAYER_COLORS[value.seat] ?? PLAYER_COLORS[0];
+        item.graphic.clear().fillStyle(Number.parseInt(ownerColor.slice(1), 16), .28).fillRect(0, 0, 32, 16)
+          .lineStyle(1, Number.parseInt((value.valid ? ownerColor : '#ff8a83').slice(1), 16)).strokeRect(0, 0, 32, 16);
+        item.label.setText(`${value.valid ? '✓' : '×'} ${value.displayName}`).setColor(value.valid ? ownerColor : '#ff8a83');
+      }
+      if (import.meta.env.DEV) host.dataset.remotePreviews = JSON.stringify(values);
     }
     positionNames() {
       if (!network || snapshot.phase !== 'RACE') return;
@@ -149,7 +193,7 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
     }
     refreshPause() {
       if (!this.player) return;
-      if (paused || snapshot.phase !== 'RACE') this.physics.pause(); else this.physics.resume();
+      if (network || paused || snapshot.phase !== 'RACE') this.physics.pause(); else this.physics.resume();
     }
     buildView() {
       if (!this.player) return;
@@ -157,7 +201,8 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       if (snapshot.phase !== 'BUILD') return;
       this.cameras.main.centerOn(centerX, 232);
       if (preview) {
-        const color = valid ? 0x9af1bf : 0xff8a83;
+        const seat = network?.getRoom()?.players.find(p => p.playerId === network.localId)?.seat ?? 0;
+        const color = valid ? network ? Number.parseInt(PLAYER_COLORS[seat]!.slice(1), 16) : 0x9af1bf : 0xff8a83;
         this.ghost.fillStyle(color, .35).fillRect(preview.x, preview.y, 32, 16);
         this.ghost.lineStyle(1, color, 1).strokeRect(preview.x, preview.y, 32, 16);
         this.ghost.fillStyle(color).fillRect(preview.x + 14, preview.y + 6, 4, 4);
@@ -168,16 +213,52 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       if (disposed || !this.player) return;
       const body = this.player.body as Phaser.Physics.Arcade.Body;
       if (network) {
+        if (snapshot.phase === 'RACE' && network.isConnected()) {
+          this.accumulator += Math.min(delta, 100);
+          let control: RaceControls | undefined;
+          while (this.accumulator >= 1000 / PLAYER_PHYSICS.tickHz) {
+            this.accumulator -= 1000 / PLAYER_PHYSICS.tickHz;
+            control = this.prediction!.step(paused ? 0 : input.direction as -1 | 0 | 1, !paused && input.consumeJump());
+          }
+          if (control && time - this.sentAt >= 1000 / PLAYER_PHYSICS.inputHz) { this.sentAt = time; network.sendInput(control); }
+          const own = this.prediction?.own;
+          if (own) {
+            this.offset.x *= PLAYER_PHYSICS.correctionDecay; this.offset.y *= PLAYER_PHYSICS.correctionDecay;
+            body.reset(own.x, own.y); body.blocked.down = own.grounded;
+            this.player.setPosition(own.x + this.offset.x, own.y + this.offset.y).setVelocity(own.velocityX, own.velocityY);
+            if (own.velocityX) this.player.setFlipX(own.velocityX < 0);
+            this.player.setFrame(playerFrame(visual, own.grounded, own.velocityX, time));
+            this.reachedGoal = own.finished;
+          }
+        }
         for (const actor of this.remote.values()) if (actor.target) {
-          const alpha = Phaser.Math.Clamp((performance.now() - actor.receivedAt) / (1000 / ONLINE_RULES.snapshotHz), 0, 1);
+          const alpha = Phaser.Math.Clamp((performance.now() - actor.receivedAt) / PLAYER_PHYSICS.interpolationMs, 0, 1);
           actor.sprite.setPosition(Phaser.Math.Linear(actor.fromX, actor.target.x, alpha), Phaser.Math.Linear(actor.fromY, actor.target.y, alpha));
+          const own = this.prediction?.own, predicted = this.prediction?.players.find(p => p.playerId === actor.target!.playerId);
+          if (own && predicted?.active && (own.supportId === predicted.playerId || predicted.supportId === own.playerId ||
+            (Math.abs(predicted.x - own.x) < PLAYER_PHYSICS.width + 4 && Math.abs(predicted.y - own.y) < PLAYER_PHYSICS.height + 4))) {
+            // Nearby contacts use the same predicted world as the local body; avoid drawing overlap.
+            actor.sprite.setPosition(predicted.x, predicted.y);
+          }
           actor.sprite.setFlipX(actor.target.velocityX < 0);
           const character = network.getRoom()?.players.find(p => p.playerId === actor.target!.playerId)?.characterId ?? 'altoha';
-          actor.sprite.setFrame(playerFrame(getPlayerVisual(character), Math.abs(actor.target.velocityY) < 1, actor.target.velocityX, time));
+          actor.sprite.setFrame(playerFrame(getPlayerVisual(character), actor.target.grounded, actor.target.velocityX, time));
+        }
+        for (const item of this.previews.values()) {
+          const alpha = Phaser.Math.Clamp((performance.now() - item.at) / PLAYER_PHYSICS.interpolationMs, 0, 1);
+          item.graphic.setPosition(Math.round(Phaser.Math.Linear(item.fromX, item.value.position.x, alpha)), Math.round(Phaser.Math.Linear(item.fromY, item.value.position.y, alpha)));
+          item.label.setPosition(item.graphic.x + 16, item.graphic.y - 3);
+        }
+        this.impacts.clear();
+        this.particles = this.particles.filter(p => performance.now() - p.at < 180).slice(-12);
+        for (const particle of this.particles) {
+          const progress = (performance.now() - particle.at) / 180;
+          this.impacts.fillStyle(particle.impact.kind === 'push' ? 0xffb66d : 0x9ae0dd, 1 - progress);
+          for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) this.impacts.fillRect(Math.round(particle.impact.x + dx! * (2 + progress * 6)), Math.round(particle.impact.y + dy! * (2 + progress * 5)), 2, 2);
         }
         this.positionNames();
       }
-      if (!paused && snapshot.phase === 'RACE' && !this.reachedGoal) {
+      if (!network && !paused && snapshot.phase === 'RACE' && !this.reachedGoal) {
         this.elapsedMs += Math.min(delta, 100);
         if (body.blocked.down) this.groundedAt = time;
         if (input.consumeJump()) this.jumpAt = time;
@@ -192,14 +273,18 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
           if (!network) { this.reachedGoal = true; input.clear(); onGoal(this.elapsedMs); }
         }
       }
-      if (network && !paused && snapshot.phase === 'RACE' && !this.reachedGoal && time - this.sentAt >= 1000 / ONLINE_RULES.movementHz) {
-        this.sentAt = time; network.sendMovement({ round: snapshot.round, sequence: ++this.movementSequence, x: body.center.x, y: body.bottom, velocityX: body.velocity.x, velocityY: body.velocity.y });
-      }
       if (import.meta.env.DEV) {
+        this.frameTimes.push(delta); if (this.frameTimes.length > 120) this.frameTimes.shift();
+        host.dataset.fps = String(Math.round(1000 * this.frameTimes.length / this.frameTimes.reduce((a, b) => a + b, 0)));
+        host.dataset.authoritativePlayers = JSON.stringify(network?.getMovement()?.players ?? []);
+        host.dataset.authoritativeImpacts = JSON.stringify(network?.getMovement()?.impacts ?? []);
+        host.dataset.playerSupport = this.prediction?.own?.supportId ?? '';
+        host.dataset.impactParticles = String(this.particles.length);
+        host.dataset.renderedPlayers = JSON.stringify([{ playerId: network?.localId, x: this.player.x, y: this.player.y, texture: this.player.texture.key, name: this.ownLabel?.text }, ...[...this.remote.entries()].map(([playerId, p]) => ({ playerId, x: p.sprite.x, y: p.sprite.y, texture: p.sprite.texture.key, name: p.label.text }))]);
         host.dataset.remotePlayers = String(this.remote.size);
         host.dataset.remoteNames = [...this.remote.values()].map(p => p.label.text).join(',');
         host.dataset.remotePositions = JSON.stringify([...this.remote.values()].map(p => ({ x: Math.round(p.sprite.x), y: Math.round(p.sprite.y) })));
-        host.dataset.playerX = String(Math.round(body.center.x)); host.dataset.playerBottom = String(Math.round(body.bottom));
+        host.dataset.playerX = String(Math.round(this.prediction?.own?.x ?? body.center.x)); host.dataset.playerBottom = String(Math.round(this.prediction?.own?.y ?? body.bottom));
         host.dataset.grounded = String(body.blocked.down); host.dataset.cameraX = String(Math.round(this.cameras.main.scrollX));
         host.dataset.cameraY = String(Math.round(this.cameras.main.scrollY));
       }

@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CHARACTERS, STARTER_CHARACTER } from '@doner-game/shared';
+import { CHARACTERS, STARTER_CHARACTER, getCharacter } from '@doner-game/shared';
 import { createDatabase } from '../src/db.ts';
 import { createPlayerStore } from '../src/players.ts';
 import { ApiError } from '../src/errors.ts';
 import { buildApp } from '../src/app.ts';
 import { config, memoryPlayers, profile } from './helpers.ts';
 
-test('catalog defines one free starter and independent one-Doner unlocks', () => {
+test('catalog preserves the starter/legacy costs and adds stable free Ayazhan', () => {
   assert.equal(STARTER_CHARACTER.id, 'altoha');
   assert.equal(CHARACTERS.filter(character => character.starter).length, 1);
-  assert.deepEqual(CHARACTERS.map(({ id, unlockCost }) => [id, unlockCost]), [['altoha', 0], ['aigerim', 1], ['temik', 1]]);
+  assert.deepEqual(CHARACTERS.map(({ id, unlockCost }) => [id, unlockCost]), [['altoha', 0], ['aigerim', 1], ['temik', 1], ['ayazhan', 0]]);
+  assert.equal(getCharacter('ayazhan')?.displayName, 'Аяжан');
+  assert.equal(getCharacter('AYAZHAN'), undefined);
+  assert.equal(new Set(CHARACTERS.map(c => c.order)).size, 4);
 });
 
 test('character routes require JWT, reject client economy fields, and use the internal subject', async t => {
