@@ -11,7 +11,7 @@ test('catalog preserves the starter/legacy costs and adds stable free Ayazhan', 
   assert.equal(STARTER_CHARACTER.id, 'altoha');
   assert.equal(CHARACTERS.filter(character => character.starter).length, 1);
   assert.deepEqual(CHARACTERS.map(({ id, unlockCost }) => [id, unlockCost]), [['altoha', 0], ['aigerim', 1], ['temik', 1], ['ayazhan', 0]]);
-  assert.equal(getCharacter('ayazhan')?.displayName, 'Аяжан');
+  assert.equal(getCharacter('ayazhan')?.displayName, 'Ayazhan');
   assert.equal(getCharacter('AYAZHAN'), undefined);
   assert.equal(new Set(CHARACTERS.map(c => c.order)).size, 4);
 });

@@ -86,11 +86,11 @@ try {
     await page.getByRole('heading', { name: 'СНЕЖНАЯ БАНДА' }).waitFor();
   }
   await A.waitForFunction(() => document.querySelectorAll('.lobby-player').length === 4);
-  for (const [page, name] of [[A, 'Аяжан'], [B, 'Aigerim'], [C, 'Temik'], [D, 'Altoha']]) {
+  for (const [page, name] of [[A, 'Ayazhan'], [B, 'Aigerim'], [C, 'Temik'], [D, 'Altoha']]) {
     assert.equal(await page.locator('.room-characters button').count(), 4);
     await page.getByRole('button', { name, exact: true }).click();
   }
-  await B.locator('.lobby-player').filter({ hasText: 'Антон' }).getByText(/Аяжан/).waitFor();
+  await B.locator('.lobby-player').filter({ hasText: 'Антон' }).getByText(/Ayazhan/).waitFor();
   await widths(A, 'lobby');
   for (const page of [A, B, C, D]) await page.getByRole('button', { name: 'ГОТОВ', exact: true }).click();
   await A.getByRole('button', { name: 'НАЧАТЬ МАТЧ →' }).click();
