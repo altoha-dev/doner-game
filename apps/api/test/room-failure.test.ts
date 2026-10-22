@@ -5,7 +5,7 @@ import { profile } from './helpers.ts';
 
 test('failed LEAVE persistence preserves the authoritative body and membership until retry commits', async t => {
   let failWrite = false;
-  const manager = new RoomManager({ async load() { return []; }, async save() { if (failWrite) throw new Error('Injected store failure'); } });
+  const manager = new RoomManager({ async load() { return []; }, async settle() {}, async save() { if (failWrite) throw new Error('Injected store failure'); } });
   t.after(() => manager.stop());
   const other = { ...profile, user: { ...profile.user, id: '970c6870-af30-468a-812b-ee49e1f53473' } };
   const room = await manager.command(profile, { type: 'CREATE', capacity: 2 });

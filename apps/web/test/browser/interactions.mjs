@@ -48,7 +48,7 @@ async function choose(page, right = 0, up = 0) {
   for (let i = 0; i < right; i++) await page.getByRole('button', { name: 'Блок вправо', exact: true }).click();
   for (let i = 0; i < up; i++) await page.getByRole('button', { name: 'Блок вверх', exact: true }).click();
 }
-const confirm = page => page.getByRole('button', { name: 'ПОСТАВИТЬ БЛОК', exact: true }).click();
+const confirm = async page => { await page.getByRole('button', { name: 'ПОСТАВИТЬ БЛОК', exact: true }).click(); await page.getByRole('button', { name: 'ЗАВЕРШИТЬ СТРОИТЕЛЬСТВО' }).click(); };
 async function finish(page) {
   await page.keyboard.down('ArrowRight');
   const until = Date.now() + 40000;
@@ -199,10 +199,11 @@ try {
   await host.getByRole('button', { name: 'СЛЕДУЮЩИЙ РАУНД →' }).click();
   for (const page of [A, B, C, D]) { await page.getByRole('heading', { name: /BUILD/ }).waitFor(); assert.equal(await page.getByTestId('block-count').textContent(), '3/20'); }
   await A.screenshot({ path: `${shots}/next-round.png`, fullPage: true });
+  const expectedBalance = Number((await A.getByTestId('doner-balance').innerText()).match(/\d+/)[0]);
   await A.evaluate(() => window.__back()); await A.getByRole('button', { name: 'ВЫЙТИ ИЗ КОМНАТЫ' }).click();
   await A.getByRole('heading', { name: 'DONER GAME' }).waitFor(); assert.equal(await A.locator('canvas').count(), 0);
-  assert.equal(await A.locator('.hud-coin').first().innerText(), 'DONER ×42'); assert.deepEqual(errors, []);
-  pass('four identical results, NEXT retains blocks, BackButton cleanup, balance unchanged');
+  await A.waitForFunction(n => document.querySelector('.hud-coin')?.textContent === `DONER ×${n}`, expectedBalance); assert.deepEqual(errors, []);
+  pass('four identical results, NEXT retains blocks, BackButton cleanup, confirmed balance');
   await writeFile(`${shots}/checks.json`, JSON.stringify(results, null, 2));
   console.log(`PASS ${results.length} Stage 6.1.5 browser scenarios`);
 } catch (error) {

@@ -12,7 +12,8 @@
     "test:network-bench": "node --import tsx test/network-physics.bench.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy"
+    "db:deploy": "prisma migrate deploy",
+    "test:traps-bench": "node --import tsx test/trap-network.bench.ts"
   },
   "dependencies": {
     "@doner-game/shared": "workspace:*",

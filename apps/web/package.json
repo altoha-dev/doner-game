@@ -12,7 +12,10 @@
     "test:browser": "node test/browser/game.mjs",
     "test:party": "node test/browser/party.mjs",
     "test:interactions": "node test/browser/interactions.mjs",
-    "test:network": "node test/browser/network.mjs"
+    "test:network": "node test/browser/network.mjs",
+    "test:economy": "node test/browser/economy.mjs",
+    "test:traps": "node test/browser/traps.mjs",
+    "test:training-traps": "node test/browser/training-traps.mjs"
   },
   "dependencies": {
     "@doner-game/shared": "workspace:*",

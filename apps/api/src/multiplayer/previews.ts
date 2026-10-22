@@ -1,4 +1,4 @@
-import { ONLINE_RULES, placementError, SNOWY_CHAOS } from '@doner-game/shared';
+import { buildOffer, ONLINE_RULES, trapOrientation, placementError, SNOWY_CHAOS } from '@doner-game/shared';
 import type { BuildPreview, BuildPreviewInput, OnlineRoom, PreviewSnapshot } from '@doner-game/shared';
 type State = { round: number; values: Map<string, BuildPreview>; sequences: Map<string, number>; dirty: boolean };
 
@@ -20,9 +20,9 @@ export class BuildPreviews {
     if (input.sequence <= (state.sequences.get(userId) ?? -1)) return;
     state.sequences.set(userId, input.sequence);
     if (!input.position) { if (state.values.delete(userId)) state.dirty = true; return; }
-    const reason = placementError(SNOWY_CHAOS, room.match.placements, input.position, ONLINE_RULES.maxPlacements);
+    const reason = !buildOffer(room, userId, input.objectType) ? 'Нет доступного размещения' : placementError(SNOWY_CHAOS, room.match.placements, input.position, ONLINE_RULES.maxPlacements, input.objectType, input.orientation);
     state.values.set(userId, { playerId: userId, displayName: player.displayName, seat: player.seat,
-      sequence: input.sequence, objectType: input.objectType, position: { ...input.position },
+      sequence: input.sequence, objectType: input.objectType, orientation: trapOrientation(input.objectType, input.orientation)!, position: { ...input.position },
       valid: !reason, reason, expiresAt: now + ONLINE_RULES.previewTtlMs });
     state.dirty = true;
   }
@@ -37,7 +37,7 @@ export class BuildPreviews {
       if (room.match.phase !== 'BUILD' || !player || preview.expiresAt <= now) {
         state.values.delete(id); state.dirty = true;
       } else {
-        const reason = placementError(SNOWY_CHAOS, room.match.placements, preview.position, ONLINE_RULES.maxPlacements);
+        const reason = !buildOffer(room, id, preview.objectType) ? 'Нет доступного размещения' : placementError(SNOWY_CHAOS, room.match.placements, preview.position, ONLINE_RULES.maxPlacements, preview.objectType, preview.orientation);
         if (reason !== preview.reason) { preview.reason = reason; preview.valid = !reason; state.dirty = true; }
       }
     }

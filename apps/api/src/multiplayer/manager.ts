@@ -1,5 +1,5 @@
 import { randomInt, randomUUID } from 'node:crypto';
-import { buildMiniAppLink, getCharacter, ONLINE_RULES, placementError, PLAYER_PHYSICS, SNOWY_CHAOS } from '@doner-game/shared';
+import { getTrap, trapOrientation, buildOffer, buildMiniAppLink, getCharacter, ONLINE_RULES, placementError, PLAYER_PHYSICS, SNOWY_CHAOS } from '@doner-game/shared';
 import type { BuildPreviewInput, MatchPhase, MovementSnapshot, OnlinePlayer, OnlineRoom, PlayerProfileDto, PreviewSnapshot, RaceInputBatch, RoomCommand } from '@doner-game/shared';
 import type { RoomStore } from './store.js';
 import { displayName } from './store.js';
@@ -17,6 +17,8 @@ export class RoomManager {
   private previews = new BuildPreviews();
   private disconnectedAt = new Map<string, number>();
   private networkSequence = 0;
+  private activityWrites = new Set<string>();
+  private settlementRetry = new Map<string, number>();
   private finishing = new Set<string>();
   onError: () => void = () => {};
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -49,7 +51,11 @@ export class RoomManager {
   }
   async stop() { clearInterval(this.timer); await this.queue; }
   private serial<T>(action: () => Promise<T>): Promise<T> { const next = this.queue.then(action); this.queue = next.catch(() => {}); return next; }
-  private phase(room: OnlineRoom, phase: MatchPhase) { room.match = { ...room.match, phase }; room.deadline = null; }
+  private phase(room: OnlineRoom, phase: MatchPhase) {
+    room.match = { ...room.match, phase }; room.deadline = null;
+    const round = room.rounds?.find(r => r.round === room.match.round);
+    if (['RESULTS', 'MATCH_FINISHED'].includes(phase) && room.raceStartedAt !== null && round?.status === 'NOT_STARTED') round.status = 'PENDING';
+  }
   private async commit(room: OnlineRoom, isNew = false) {
     room.revision++; room.match = { ...room.match, revision: room.revision };
     await this.store.save(room, isNew); this.rooms.set(room.roomId, room); this.previews.sync(room, Date.now()); this.onSnapshot(structuredClone(room));
@@ -75,7 +81,10 @@ export class RoomManager {
     return this.serial(async () => {
       const userId = profile.user.id;
       let current = this.forUser(userId);
-      if (command.type === 'RESUME') return current ? structuredClone(current) : null;
+      if (command.type === 'RESUME') {
+        if (current) { const saved = (await this.store.load(current.roomId))[0]; if (saved) { current = { ...current, balances: saved.balances ?? {} }; this.rooms.set(current.roomId, current); this.onSnapshot(structuredClone(current)); } }
+        return current ? structuredClone(current) : null;
+      }
       if (command.type === 'CREATE') {
         requireRoom(!current, 'ALREADY_IN_ROOM', 'Сначала выйдите из текущей комнаты.');
         const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -83,7 +92,7 @@ export class RoomManager {
         const id = randomUUID();
         const room: OnlineRoom = { roomId: id, code, hostId: userId, capacity: command.capacity, revision: 0, expiresAt: Date.now() + this.timing.roomTtlMs,
           deadline: null, raceStartedAt: null, inviteLink: this.botUsername ? buildMiniAppLink(this.botUsername, `room_${code}`) : null, recoveryMessage: null,
-          players: [this.player(profile, 0)], finishes: [], match: { matchId: id, arenaId: SNOWY_CHAOS.id, arenaRevision: SNOWY_CHAOS.revision, revision: 0, phase: 'LOBBY', round: 0, placements: [], results: [] } };
+          players: [this.player(profile, 0)], balances: { [userId]: profile.progress.doners }, rounds: [], finishes: [], match: { matchId: id, arenaId: SNOWY_CHAOS.id, arenaRevision: SNOWY_CHAOS.revision, revision: 0, phase: 'LOBBY', round: 0, placements: [], results: [] } };
         await this.commit(room, true); return structuredClone(room);
       }
       if (command.type === 'JOIN') {
@@ -120,19 +129,22 @@ export class RoomManager {
           requireRoom(room.players.filter(p => !p.left).every(p => p.connected && p.ready), 'NOT_READY', 'Дождитесь подключения и готовности всех игроков.');
           this.build(room); break;
         case 'PLACE': {
+          requireRoom(getTrap(command.trapId ?? 'basic-platform'), 'INVALID_TRAP', 'Неизвестная ловушка.');
           const duplicate = room.match.placements.find(p => p.id === command.commandId);
-          if (duplicate) { requireRoom(duplicate.ownerId === userId && duplicate.round === command.round && duplicate.x === command.position.x && duplicate.y === command.position.y, 'DUPLICATE_COMMAND', 'Этот запрос уже использован.'); return structuredClone(room); }
+          if (duplicate) { requireRoom(duplicate.ownerId === userId && duplicate.round === command.round && duplicate.catalogId === (command.trapId ?? 'basic-platform') && (duplicate.orientation ?? 'none') === trapOrientation(command.trapId ?? 'basic-platform', command.orientation) && duplicate.x === command.position.x && duplicate.y === command.position.y, 'DUPLICATE_COMMAND', 'Этот запрос уже использован.'); return structuredClone(room); }
           phase('BUILD');
           requireRoom(command.round === room.match.round, 'STALE_ROUND', 'Раунд уже изменился.');
           requireRoom(command.expectedRevision === room.revision, 'STALE_REVISION', 'Карта обновилась. Проверьте место и повторите.');
           requireRoom(!player.buildDone, 'ALREADY_BUILT', 'Ваш ход уже завершён.');
-          const error = placementError(SNOWY_CHAOS, room.match.placements, command.position, ONLINE_RULES.maxPlacements);
+          const offer = buildOffer(room, userId, command.trapId ?? 'basic-platform');
+          requireRoom(offer, 'NO_SLOT', 'После бесплатного блока доступен только один EXTRA BLOCK.');
+          const error = placementError(SNOWY_CHAOS, room.match.placements, command.position, ONLINE_RULES.maxPlacements, command.trapId ?? 'basic-platform', command.orientation);
           requireRoom(!error, 'INVALID_PLACEMENT', error ?? 'Недопустимое место.');
-          room.match = { ...room.match, placements: [...room.match.placements, { id: command.commandId, ownerId: userId, round: room.match.round, catalogId: 'basic-platform', ...command.position, width: 32, height: 16 }] };
-          player.buildDone = true; this.advance(room); break;
+          room.match = { ...room.match, placements: [...room.match.placements, { id: command.commandId, ownerId: userId, round: room.match.round, slot: offer!.slot, cost: offer!.cost, catalogId: command.trapId ?? 'basic-platform', orientation: trapOrientation(command.trapId ?? 'basic-platform', command.orientation)!, ...command.position, ...getTrap(command.trapId ?? 'basic-platform')!.dimensions }] };
+          player.buildDone = offer!.endsTurn; this.advance(room); break;
         }
         case 'SKIP': phase('BUILD'); requireRoom(command.round === room.match.round, 'STALE_ROUND', 'Раунд уже изменился.'); player.buildDone = true; this.advance(room); break;
-        case 'NEXT': host(); phase('RESULTS'); if (room.match.round >= ONLINE_RULES.maxRounds) this.phase(room, 'MATCH_FINISHED'); else this.build(room); break;
+        case 'NEXT': host(); phase('RESULTS'); requireRoom(!room.rounds?.some(r => r.status === 'PENDING'), 'SETTLEMENT_PENDING', 'Награды сохраняются. Подождите подтверждения сервера.'); if (room.match.round >= ONLINE_RULES.maxRounds) this.phase(room, 'MATCH_FINISHED'); else this.build(room); break;
         case 'CLOSE': host(); if (room.match.phase === 'RACE') this.completeMissing(room, 'ABORTED'); this.phase(room, 'MATCH_FINISHED'); break;
       }
       await this.commit(room); return structuredClone(room);
@@ -140,17 +152,20 @@ export class RoomManager {
   }
   private player(profile: PlayerProfileDto, seat: number): OnlinePlayer {
     return { playerId: profile.user.id, displayName: displayName(profile.user.firstName, profile.user.username), photoUrl: profile.user.photoUrl,
-      characterId: getCharacter(profile.progress.selectedCharacterId)?.id ?? 'altoha', ready: false, connected: true, left: false, buildDone: false, seat };
+      characterId: getCharacter(profile.progress.selectedCharacterId)?.id ?? 'altoha', ready: false, connected: true, left: false, buildDone: false, seat, score: 0 };
   }
   private build(room: OnlineRoom) {
     this.phase(room, 'BUILD'); room.match = { ...room.match, round: room.match.round + 1 };
     room.deadline = Date.now() + this.timing.buildMs; room.raceStartedAt = null; room.recoveryMessage = null;
+    room.rounds = [...(room.rounds ?? []), { round: room.match.round, status: 'NOT_STARTED', participantIds: [], playedIds: [], settledAt: null }];
     room.players.forEach(p => { p.buildDone = p.left; }); this.races.delete(room.roomId);
   }
   private advance(room: OnlineRoom) {
     if (room.match.phase === 'BUILD' && room.players.filter(p => !p.left).every(p => p.buildDone)) {
+      const summary = room.rounds?.find(r => r.round === room.match.round);
+      if (summary) summary.participantIds = room.players.filter(p => !p.left && p.connected).map(p => p.playerId);
       this.phase(room, 'RACE'); room.raceStartedAt = Date.now(); room.deadline = room.raceStartedAt + this.timing.raceMs;
-      this.races.set(room.roomId, new RaceSimulation(room.players.filter(p => !p.left), room.match.round, [...SNOWY_CHAOS.geometry, ...room.match.placements], room.raceStartedAt));
+      this.races.set(room.roomId, new RaceSimulation(room.players.filter(p => !p.left), room.match.round, [...SNOWY_CHAOS.geometry, ...room.match.placements], room.raceStartedAt, room.match.placements));
     }
     if (room.match.phase === 'RACE' && room.players.filter(p => !p.left).every(p => room.finishes.some(f => f.round === room.match.round && f.playerId === p.playerId))) this.phase(room, 'RESULTS');
   }
@@ -159,6 +174,17 @@ export class RoomManager {
   }
   private async tick(now: number) {
     for (const current of this.rooms.values()) {
+      const pending = current.rounds?.find(r => r.status === 'PENDING');
+      if (pending) {
+        if (now < (this.settlementRetry.get(current.roomId) ?? 0)) continue;
+        this.settlementRetry.set(current.roomId, now + 2000);
+        try {
+          await this.store.settle(current.roomId, pending.round);
+          const saved = (await this.store.load(current.roomId))[0];
+          if (saved) { this.rooms.set(saved.roomId, saved); this.onSnapshot(structuredClone(saved)); }
+        } catch { this.onError(); }
+        continue;
+      }
       if (current.match.phase === 'MATCH_FINISHED') { if (now > current.expiresAt) { this.rooms.delete(current.roomId); this.races.delete(current.roomId); this.previews.remove(current.roomId); } continue; }
       const room = structuredClone(current); let changed = false;
       if (room.expiresAt <= now) { if (room.match.phase === 'RACE') this.completeMissing(room, 'DNF'); this.phase(room, 'MATCH_FINISHED'); changed = true; }
@@ -176,7 +202,16 @@ export class RoomManager {
   }
   input(userId: string, value: RaceInputBatch) {
     const room = this.forUser(userId);
-    if (room?.match.phase === 'RACE') this.races.get(room.roomId)?.input(userId, value, Date.now());
+    if (room?.match.phase !== 'RACE') return;
+    const accepted = this.races.get(room.roomId)?.input(userId, value, Date.now());
+    const summary = room.rounds?.find(r => r.round === room.match.round), key = `${room.roomId}:${room.match.round}:${userId}`;
+    if (!accepted || !value.frames.some(f => f.direction !== 0 || f.jump > 0) || !summary?.participantIds.includes(userId) || summary.playedIds.includes(userId) || this.activityWrites.has(key)) return;
+    this.activityWrites.add(key);
+    void this.serial(async () => {
+      const current = this.rooms.get(room.roomId); if (!current || current.match.phase !== 'RACE' || current.match.round !== value.round) return;
+      const next = structuredClone(current), round = next.rounds!.find(r => r.round === value.round)!;
+      if (!round.playedIds.includes(userId)) { round.playedIds.push(userId); await this.commit(next); }
+    }).catch(() => this.onError()).finally(() => this.activityWrites.delete(key));
   }
   preview(userId: string, value: BuildPreviewInput) {
     const room = this.forUser(userId);
@@ -192,7 +227,7 @@ export class RoomManager {
       race.advance(now);
       for (const player of race.players) {
         const finishKey = `${room.roomId}:${room.match.round}:${player.playerId}`;
-        if (player.finished || !atFinish(player) || this.finishing.has(finishKey)) continue;
+        if (player.finished || (player.life && player.life.phase !== 'ALIVE') || !atFinish(player) || this.finishing.has(finishKey)) continue;
         this.finishing.add(finishKey); const finishedAt = now;
         void this.serial(async () => {
           const current = this.rooms.get(room.roomId)!;

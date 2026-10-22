@@ -1,6 +1,7 @@
+import { drawTrap, TrapRenderer } from './trapVisuals';
 import Phaser from 'phaser';
-import { CHARACTERS, PLAYER_COLORS, PLAYER_PHYSICS } from '@doner-game/shared';
-import type { BuildPreview, MovementSnapshot, NetworkImpact } from '@doner-game/shared';
+import { CHARACTERS, PLAYER_COLORS, PLAYER_PHYSICS, getTrap, TrapSimulation, createPhysicsPlayer, overlaps, playerBody } from '@doner-game/shared';
+import type { BuildPreview, MovementSnapshot, NetworkImpact, PhysicsPlayer, TrapId, Orientation, TrapSnapshot } from '@doner-game/shared';
 import type { NetworkBridge } from '../multiplayer/connection';
 import { RacePrediction } from '../multiplayer/prediction';
 import { RacePresentation } from '../multiplayer/presentation';
@@ -13,7 +14,7 @@ import { getPlayerVisual, playerFrame } from './playerVisual';
 
 export interface GameRuntime {
   applySnapshot(snapshot: MatchSnapshot): void;
-  setBuildView(centerX: number, preview: Point | null, valid: boolean): void;
+  setBuildView(centerX: number, preview: Point | null, valid: boolean, trapId?: TrapId, orientation?: Orientation): void;
   screenToWorld(clientX: number, clientY: number): Point;
   setPaused(paused: boolean): void;
   destroy(): void;
@@ -25,6 +26,7 @@ interface Options {
 export function createGame({ host, arena, characterId, snapshot: initialSnapshot, input, reducedMotion, network, onReady, onGoal }: Options): GameRuntime {
   let disposed = false, paused = false, snapshot = initialSnapshot;
   let centerX = 192, preview: Point | null = null, valid = false;
+  let previewTrap: TrapId = 'basic-platform', previewOrientation: Orientation = 'none';
   const visual = getPlayerVisual(characterId);
   const spawn = () => arena.spawns[network?.getRoom()?.players.find(p => p.playerId === network.localId)?.seat ?? 0] ?? arena.spawns[0]!;
   const measure = () => ({ width: Math.max(1, Math.floor(host.clientWidth / 2)), height: Math.max(1, Math.floor(host.clientHeight / 2)) });
@@ -40,6 +42,13 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
     private jumpAt = -Infinity;
     private elapsedMs = 0;
     private reachedGoal = false;
+    private trapRenderer!: TrapRenderer;
+    private trapState: TrapSnapshot | undefined;
+    private trapAt = 0;
+    private trainingWorld: TrapSimulation | null = null;
+    private trainee?: PhysicsPlayer;
+    private localSequence = 0;
+    private localJump = 0;
     private prediction = network ? new RacePrediction(network.localId, arena) : null;
     private accumulator = 0;
     private presentation: RacePresentation | null = null;
@@ -74,6 +83,7 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       for (let y = 176; y <= 272; y += arena.grid) this.grid.lineBetween(0, y, arena.width, y);
       for (const a of arena.protectedAreas) this.grid.fillStyle(0xf68b83, .09).fillRect(a.x, 176, a.width, 96);
       this.ghost = this.add.graphics().setDepth(6);
+      this.trapRenderer = new TrapRenderer(this, reducedMotion);
       this.impacts = this.add.graphics().setDepth(8);
       this.apply(); this.resize();
       if (network) {
@@ -93,7 +103,7 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
     apply() {
       if (!this.player) return;
       for (const block of snapshot.placements) if (!this.placed.has(block.id)) {
-        this.solids.add(this.add.image(block.x, block.y, 'built-block').setOrigin(0).setDepth(2));
+        this.solids.add(block.catalogId === 'basic-platform' ? this.add.image(block.x, block.y, 'built-block').setOrigin(0).setDepth(2) : this.add.rectangle(block.x, block.y, block.width, block.height, 0, 0).setOrigin(0));
         this.placed.add(block.id);
       }
       if (this.phase !== snapshot.phase || this.round !== snapshot.round) {
@@ -102,6 +112,11 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
         this.phase = snapshot.phase;
         if (snapshot.phase === 'RACE') {
           this.reachedGoal = false; this.elapsedMs = 0;
+          this.trapState = undefined;
+          if (!network) {
+            this.trainingWorld = snapshot.placements.some(p => getTrap(p.catalogId)?.activation.kind !== 'none') ? new TrapSimulation(arena, snapshot.placements) : null;
+            this.trainee = createPhysicsPlayer('local-player', 0, spawn().x, spawn().y); this.localSequence = 0; this.localJump = 0;
+          }
           this.accumulator = 0; this.sentAt = -Infinity;
           const room = network?.getRoom(); if (room) { this.prediction?.begin(room); this.presentation = new RacePresentation(network!.localId, arena, [...arena.geometry, ...snapshot.placements]); }
           this.player.setPosition(spawn().x, spawn().y).setVelocity(0, 0).setAcceleration(0, 0);
@@ -138,6 +153,7 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
     receiveMovement(value: MovementSnapshot, reset: boolean) {
       if (!this.player || value.round !== snapshot.round || snapshot.phase !== 'RACE') return;
       if (!this.prediction?.reconcile(value, reset)) return;
+      this.trapState = value.traps; this.trapAt = performance.now();
       const correction = this.prediction.lastCorrection;
       this.presentation?.receive(value, this.prediction.players, performance.now(), correction.reset);
       if (import.meta.env.DEV) network?.diagnostics?.correction(performance.now(), correction.distance, correction.reset);
@@ -166,9 +182,10 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
         }
         item.value = value;
         const ownerColor = PLAYER_COLORS[value.seat] ?? PLAYER_COLORS[0];
-        item.graphic.clear().fillStyle(Number.parseInt(ownerColor.slice(1), 16), .28).fillRect(0, 0, 32, 16)
+        item.graphic.clear(); drawTrap(item.graphic, value.objectType, 0, 0, value.orientation);
+        item.graphic.setAlpha(.6).fillStyle(Number.parseInt(ownerColor.slice(1), 16), .28).fillRect(0, 0, 32, 16)
           .lineStyle(1, Number.parseInt((value.valid ? ownerColor : '#ff8a83').slice(1), 16)).strokeRect(0, 0, 32, 16);
-        item.label.setText(`${value.valid ? '✓' : '×'} ${value.displayName}`).setColor(value.valid ? ownerColor : '#ff8a83');
+        item.label.setText(`${value.valid ? '✓' : '×'} ${value.displayName} · ${getTrap(value.objectType)!.displayName}${value.orientation === 'left' ? ' ←' : value.orientation === 'right' ? ' →' : value.orientation === 'up' ? ' ↑' : ''}`).setColor(value.valid ? ownerColor : '#ff8a83');
       }
       if (import.meta.env.DEV) host.dataset.remotePreviews = JSON.stringify(values);
     }
@@ -194,7 +211,7 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
     }
     refreshPause() {
       if (!this.player) return;
-      if (network || paused || snapshot.phase !== 'RACE') this.physics.pause(); else this.physics.resume();
+      if (network || this.trainingWorld || paused || snapshot.phase !== 'RACE') this.physics.pause(); else this.physics.resume();
     }
     buildView() {
       if (!this.player) return;
@@ -204,7 +221,8 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       if (preview) {
         const seat = network?.getRoom()?.players.find(p => p.playerId === network.localId)?.seat ?? 0;
         const color = valid ? network ? Number.parseInt(PLAYER_COLORS[seat]!.slice(1), 16) : 0x9af1bf : 0xff8a83;
-        this.ghost.fillStyle(color, .35).fillRect(preview.x, preview.y, 32, 16);
+        drawTrap(this.ghost, previewTrap, preview.x, preview.y, previewOrientation);
+        this.ghost.setAlpha(.6).fillStyle(color, .35).fillRect(preview.x, preview.y, 32, 16);
         this.ghost.lineStyle(1, color, 1).strokeRect(preview.x, preview.y, 32, 16);
         this.ghost.fillStyle(color).fillRect(preview.x + 14, preview.y + 6, 4, 4);
       }
@@ -233,9 +251,10 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
         }
         const rendered = this.prediction && this.presentation?.sample(this.prediction.players, performance.now(), delta);
         for (const state of rendered ?? []) {
-          if (state.playerId === network.localId) { this.player.setPosition(state.x, state.y); continue; }
+          const alpha = state.life?.phase === 'RESPAWNING' ? 0 : state.life?.phase === 'HIT' ? .35 : state.life && (this.trapState?.tick ?? 0) < state.life.immuneUntilTick ? .65 : 1;
+          if (state.playerId === network.localId) { this.player.setPosition(state.x, state.y).setAlpha(alpha); continue; }
           const actor = this.remote.get(state.playerId); if (!actor) continue;
-          actor.sprite.setPosition(state.x, state.y);
+          actor.sprite.setPosition(state.x, state.y).setAlpha(alpha);
           if (Math.abs(state.velocityX) > .1) actor.sprite.setFlipX(state.velocityX < 0);
           const character = network.getRoom()?.players.find(p => p.playerId === state.playerId)?.characterId ?? 'altoha';
           actor.sprite.setFrame(playerFrame(getPlayerVisual(character), state.grounded, state.velocityX, time));
@@ -254,7 +273,26 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
         }
         this.positionNames();
       }
-      if (!network && !paused && snapshot.phase === 'RACE' && !this.reachedGoal) {
+      if (!network && this.trainingWorld && this.trainee && !paused && snapshot.phase === 'RACE' && !this.reachedGoal) {
+        this.elapsedMs += Math.min(delta, 100); this.accumulator += Math.min(delta, 100);
+        while (this.accumulator >= 1000 / PLAYER_PHYSICS.tickHz) {
+          this.accumulator -= 1000 / PLAYER_PHYSICS.tickHz;
+          if (input.consumeJump()) this.localJump++;
+          this.trainee.active = !this.trainee.life || this.trainee.life.phase === 'ALIVE';
+          this.trainingWorld.step([this.trainee], new Map([['local-player', { sequence: ++this.localSequence, direction: input.direction as -1 | 0 | 1, jump: this.localJump }]]));
+        }
+        const own = this.trainee;
+        this.trapState = this.trainingWorld.snapshot(); this.trapAt = performance.now();
+        body.reset(own.x, own.y); body.blocked.down = own.grounded;
+        this.player.setPosition(own.x, own.y).setVelocity(own.velocityX, own.velocityY).setAlpha(own.life?.phase === 'RESPAWNING' ? 0 : own.life?.phase === 'HIT' ? .35 : 1);
+        if (own.velocityX) this.player.setFlipX(own.velocityX < 0);
+        this.player.setFrame(playerFrame(visual, own.grounded, own.velocityX, time));
+        if ((!own.life || own.life.phase === 'ALIVE') && overlaps(playerBody(own), arena.finish)) { this.reachedGoal = true; input.clear(); onGoal(this.elapsedMs); }
+      }
+      const trapElapsed = Math.max(0, performance.now() - this.trapAt);
+      const trapTick = (this.trapState?.tick ?? 0) + (snapshot.phase === 'RACE' && !paused ? Math.min(1000 / 15, trapElapsed) * PLAYER_PHYSICS.tickHz / 1000 : 0);
+      this.trapRenderer.draw(snapshot.placements, trapTick, snapshot.phase === 'RACE', this.trapState, trapElapsed);
+      if (!network && !this.trainingWorld && !paused && snapshot.phase === 'RACE' && !this.reachedGoal) {
         this.elapsedMs += Math.min(delta, 100);
         if (body.blocked.down) this.groundedAt = time;
         if (input.consumeJump()) this.jumpAt = time;
@@ -281,6 +319,9 @@ Tick ${stats.serverTick} · snapshots ${stats.snapshotHz}/s · FPS ${stats.fps}
 Error ${stats.error}px · corrections ${stats.correctionsPerSecond}/s
 Max ${stats.largestCorrection}px · stale ${stats.staleSnapshots} · gaps ≈${stats.estimatedMissingSnapshots}`;
         }
+        host.dataset.trapState = JSON.stringify(this.trapState ?? null);
+        host.dataset.trapLayout = JSON.stringify(snapshot.placements);
+        host.dataset.playerLife = JSON.stringify(this.prediction?.own?.life ?? this.trainee?.life ?? null);
         host.dataset.authoritativePlayers = JSON.stringify(network?.getMovement()?.players ?? []);
         host.dataset.authoritativeImpacts = JSON.stringify(network?.getMovement()?.impacts ?? []);
         host.dataset.playerSupport = this.prediction?.own?.supportId ?? '';
@@ -289,7 +330,7 @@ Max ${stats.largestCorrection}px · stale ${stats.staleSnapshots} · gaps ≈${s
         host.dataset.remotePlayers = String(this.remote.size);
         host.dataset.remoteNames = [...this.remote.values()].map(p => p.label.text).join(',');
         host.dataset.remotePositions = JSON.stringify([...this.remote.values()].map(p => ({ x: Math.round(p.sprite.x), y: Math.round(p.sprite.y) })));
-        host.dataset.playerX = String(Math.round(this.prediction?.own?.x ?? body.center.x)); host.dataset.playerBottom = String(Math.round(this.prediction?.own?.y ?? body.bottom));
+        host.dataset.playerX = String(Math.round(this.prediction?.own?.x ?? (this.trainingWorld ? this.trainee?.x : undefined) ?? body.center.x)); host.dataset.playerBottom = String(Math.round(this.prediction?.own?.y ?? (this.trainingWorld ? this.trainee?.y : undefined) ?? body.bottom));
         host.dataset.grounded = String(body.blocked.down); host.dataset.cameraX = String(Math.round(this.cameras.main.scrollX));
         host.dataset.cameraY = String(Math.round(this.cameras.main.scrollY));
       }
@@ -306,7 +347,7 @@ Max ${stats.largestCorrection}px · stale ${stats.staleSnapshots} · gaps ≈${s
   observer.observe(host);
   return {
     applySnapshot(value) { snapshot = value; scene.apply(); },
-    setBuildView(x, point, isValid) { centerX = x; preview = point; valid = isValid; scene.buildView(); },
+    setBuildView(x, point, isValid, trapId = 'basic-platform', orientation = 'none') { previewTrap = trapId; previewOrientation = orientation; centerX = x; preview = point; valid = isValid; scene.buildView(); },
     screenToWorld(x, y) {
       const rect = game.canvas.getBoundingClientRect();
       return { x: (x - rect.left) / 2 + scene.cameras.main.scrollX, y: (y - rect.top) / 2 + scene.cameras.main.scrollY };

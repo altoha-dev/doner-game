@@ -1,5 +1,5 @@
-import { createPhysicsPlayer, PLAYER_PHYSICS, SNOWY_CHAOS, stepPlayers } from '@doner-game/shared';
-import type { NetworkImpact, NetworkPlayer, OnlinePlayer, PlayerControls, RaceInputBatch, Rect } from '@doner-game/shared';
+import { createPhysicsPlayer, PLAYER_PHYSICS, SNOWY_CHAOS, TrapSimulation } from '@doner-game/shared';
+import type { NetworkImpact, NetworkPlayer, OnlinePlayer, PlayerControls, RaceInputBatch, Rect, TrapPlacement } from '@doner-game/shared';
 
 type InputStream = { frames: Map<number, PlayerControls>; received: number; at: number; held: PlayerControls };
 
@@ -7,14 +7,16 @@ type InputStream = { frames: Map<number, PlayerControls>; received: number; at: 
 export class RaceSimulation {
   readonly players: NetworkPlayer[];
   tick = 0;
+  private traps: TrapSimulation;
   private accumulator = 0;
   private lastAt: number;
   private inputs = new Map<string, InputStream>();
   private connected = new Set<string>();
   private effects: NetworkImpact[] = [];
   private impactAt = new Map<string, number>();
-  constructor(players: OnlinePlayer[], readonly round: number, private solids: readonly Rect[], now: number) {
+  constructor(players: OnlinePlayer[], readonly round: number, solids: readonly Rect[], now: number, placements: readonly TrapPlacement[] = []) {
     this.lastAt = now;
+    this.traps = new TrapSimulation(SNOWY_CHAOS, placements, solids);
     this.players = players.map(p => {
       if (p.connected) this.connected.add(p.playerId);
       const spawn = SNOWY_CHAOS.spawns[p.seat]!;
@@ -23,7 +25,7 @@ export class RaceSimulation {
   }
   input(userId: string, value: RaceInputBatch, now: number) {
     const player = this.players.find(p => p.playerId === userId);
-    if (!player || !this.connected.has(userId) || player.finished || value.round !== this.round || !value.frames.length) return;
+    if (!player || !this.connected.has(userId) || player.finished || (player.life && player.life.phase !== 'ALIVE') || value.round !== this.round || !value.frames.length) return;
     const latest = value.frames.at(-1)!;
     const fresh = value.frames.filter(frame => frame.sequence > player.sequence);
     let stream = this.inputs.get(userId);
@@ -37,12 +39,14 @@ export class RaceSimulation {
     }
     if (latest.sequence > player.sequence + PLAYER_PHYSICS.maxPredictionSteps) return;
     for (const frame of fresh) if (!stream.frames.has(frame.sequence)) stream.frames.set(frame.sequence, { ...frame });
-    if (latest.sequence > stream.received) {
+    const accepted = latest.sequence > stream.received;
+    if (accepted) {
       stream.received = latest.sequence; stream.at = now;
       // A late but new command still proves liveness. Preserve its edge/intent for
       // the next tick; never rewind the consumed frame clock or replay movement twice.
       if (latest.sequence <= player.sequence) stream.held = { ...latest, sequence: player.sequence, jump: Math.max(latest.jump, player.jumpSerial) };
     }
+    return accepted;
   }
   presence(userId: string, connected: boolean) {
     if (connected) this.connected.add(userId); else this.connected.delete(userId);
@@ -72,14 +76,15 @@ export class RaceSimulation {
           for (const key of stream.frames.keys()) if (key <= sequence) stream.frames.delete(key);
         }
       }
-      for (const impact of stepPlayers(this.players, controls, this.solids, SNOWY_CHAOS.width, SNOWY_CHAOS.height)) {
+      for (const impact of this.traps.step(this.players, controls)) {
         const key = `${impact.kind}:${impact.a}:${impact.b}`;
         if (now - (this.impactAt.get(key) ?? -Infinity) < PLAYER_PHYSICS.impactCooldownMs) continue;
         this.impactAt.set(key, now);
         this.effects.push({ ...impact, id: `${this.round}:${this.tick}:${key}`, tick: this.tick });
       }
+      for (const player of this.players) if (player.life && player.life.phase !== 'ALIVE') this.inputs.delete(player.playerId);
     }
     this.effects = this.effects.filter(e => this.tick - e.tick < PLAYER_PHYSICS.tickHz / 2).slice(-16);
   }
-  snapshot() { return { tick: this.tick, players: this.players.map(p => ({ ...p })), impacts: this.effects.map(e => ({ ...e })) }; }
+  snapshot() { return { tick: this.tick, traps: this.traps.snapshot(), players: this.players.map(p => ({ ...p })), impacts: this.effects.map(e => ({ ...e })) }; }
 }

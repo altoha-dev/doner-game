@@ -98,6 +98,13 @@ export function usePlayerAuth(initData: string | undefined) {
     }
   }
 
+  const confirmedBalance = useCallback((doners: number) => {
+    setState(previous => previous.status === 'authenticated' && previous.profile.progress.doners !== doners ? { ...previous, profile: { ...previous.profile, progress: { ...previous.profile.progress, doners } } } : previous);
+  }, []);
+  const refresh = useCallback(async () => {
+    const current = session.current; if (!current) return;
+    try { const profile = await current.api.getMe(current.controller.signal); if (!current.controller.signal.aborted) setState({ status: 'authenticated', profile }); } catch { /* Retry through existing account UI on the next auth/refresh. */ }
+  }, []);
   const socketCredentials = useCallback(() => session.current?.api.socketCredentials() ?? null, []);
-  return { state, socketCredentials, retry: () => setAttempt(value => value + 1), changeCharacter, pendingCharacter, actionError, notice };
+  return { state, confirmedBalance, refresh, socketCredentials, retry: () => setAttempt(value => value + 1), changeCharacter, pendingCharacter, actionError, notice };
 }

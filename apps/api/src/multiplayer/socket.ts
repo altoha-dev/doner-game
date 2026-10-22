@@ -6,6 +6,7 @@ import type { PlayerStore } from '../players.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { RoomError, RoomManager } from './manager.js';
 import type { RoomTiming } from './manager.js';
+import { EconomyError } from './economy.js';
 import { roomStore } from './store.js';
 import { parseCommand, parsePreview, parseRaceInput, RateGate } from './validation.js';
 interface SocketData { profile: PlayerProfileDto; expiresAt: number }
@@ -68,7 +69,7 @@ export async function attachMultiplayer(app: FastifyInstance, config: ApiConfig,
         ack({ ok: true, room });
         const previews = manager.previewSnapshot(userId); if (previews) socket.emit('build:previews', previews);
       })().catch((error: unknown) => {
-        if (error instanceof RoomError) ack({ ok: false, code: error.code, message: error.message });
+        if (error instanceof RoomError || error instanceof EconomyError) ack({ ok: false, code: error.code, message: error.message });
         else { app.log.error({ code: 'ROOM_ACTION_FAILED' }, 'Room action failed'); ack({ ok: false, code: 'SERVER_ERROR', message: 'Не удалось подтвердить действие. Повторите запрос.' }); }
       });
     });

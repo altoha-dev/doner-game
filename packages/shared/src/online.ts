@@ -1,3 +1,5 @@
+import type { RoundSettlement } from './economy.js';
+import type { Orientation, TrapId, TrapSnapshot } from './traps.js';
 import type { CharacterId } from './characters.js';
 import type { MatchSnapshot, Point } from './party.js';
 import type { PhysicsPlayer, PlayerControls, PlayerImpact } from './physics.js';
@@ -10,17 +12,17 @@ export const ONLINE_RULES = {
 export const PLAYER_COLORS = ['#ffb66d', '#72ddeb', '#c4a2ff', '#9ae0a5'] as const;
 export interface OnlinePlayer {
   playerId: string; displayName: string; photoUrl: string | null; characterId: CharacterId;
-  ready: boolean; connected: boolean; left: boolean; buildDone: boolean; seat: number;
+  ready: boolean; connected: boolean; left: boolean; buildDone: boolean; seat: number; score?: number;
 }
 export interface OnlineFinish {
   playerId: string; round: number; position: number | null; durationMs: number | null;
-  finishedAt: number | null; status: 'FINISHED' | 'DNF' | 'ABORTED';
+  points?: number; doners?: number; finishedAt: number | null; status: 'FINISHED' | 'DNF' | 'ABORTED';
 }
 export interface OnlineRoom {
   roomId: string; code: string; hostId: string; capacity: number; revision: number;
   expiresAt: number; deadline: number | null; raceStartedAt: number | null;
   inviteLink: string | null; recoveryMessage: string | null;
-  players: OnlinePlayer[]; match: MatchSnapshot; finishes: OnlineFinish[];
+  balances?: Record<string, number>; rounds?: RoundSettlement[]; players: OnlinePlayer[]; match: MatchSnapshot; finishes: OnlineFinish[];
 }
 export type RoomCommand =
   | { type: 'CREATE'; capacity: number }
@@ -30,7 +32,7 @@ export type RoomCommand =
   | { type: 'READY'; ready: boolean }
   | { type: 'CHARACTER'; characterId: CharacterId }
   | { type: 'START' }
-  | { type: 'PLACE'; round: number; commandId: string; expectedRevision: number; position: Point }
+  | { type: 'PLACE'; round: number; commandId: string; expectedRevision: number; position: Point; trapId?: TrapId; orientation?: Orientation }
   | { type: 'SKIP'; round: number }
   | { type: 'NEXT' }
   | { type: 'CLOSE' };
@@ -44,16 +46,18 @@ export interface RaceControls extends PlayerControls { round: number }
 export interface RaceInputBatch { round: number; frames: readonly PlayerControls[] }
 export interface NetworkPlayer extends PhysicsPlayer { round: number }
 export interface NetworkImpact extends PlayerImpact { id: string; tick: number }
-export interface MovementSnapshot { roomId: string; round: number; sequence: number; serverTime: number; tick: number; players: NetworkPlayer[]; impacts: NetworkImpact[] }
-export interface BuildPreviewInput { round: number; sequence: number; objectType: 'basic-platform'; position: Point | null }
+export interface MovementSnapshot { roomId: string; round: number; sequence: number; serverTime: number; tick: number; players: NetworkPlayer[]; impacts: NetworkImpact[]; traps?: TrapSnapshot }
+export interface BuildPreviewInput { round: number; sequence: number; objectType: TrapId; orientation?: Orientation; position: Point | null }
 export interface BuildPreview {
-  playerId: string; displayName: string; seat: number; sequence: number; objectType: 'basic-platform';
+  playerId: string; displayName: string; seat: number; sequence: number; objectType: TrapId; orientation?: Orientation;
   position: Point; valid: boolean; reason: string | null; expiresAt: number;
 }
 export interface PreviewSnapshot { roomId: string; round: number; sequence: number; serverTime: number; previews: BuildPreview[] }
 export function buildPlayerStatus(room: OnlineRoom, player: OnlinePlayer, previews: readonly BuildPreview[]): string {
   if (!player.connected) return 'ОТКЛЮЧЁН';
-  if (room.match.placements.some(p => p.ownerId === player.playerId && p.round === room.match.round)) return 'ПОСТАВИЛ БЛОК';
+  const placed = room.match.placements.find(p => p.ownerId === player.playerId && p.round === room.match.round);
+  if (placed && !player.buildDone) return 'БЛОК ГОТОВ · EXTRA ИЛИ ЗАВЕРШИТЬ';
+  if (placed) return placed.catalogId === 'basic-platform' ? 'ПОСТАВИЛ БЛОК' : 'ПОСТАВИЛ ЛОВУШКУ';
   if (player.buildDone) return 'ПРОПУСТИЛ';
   return previews.some(p => p.playerId === player.playerId) ? 'ВЫБИРАЕТ МЕСТО' : 'ВЫБИРАЕТ БЛОК';
 }

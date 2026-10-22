@@ -1,4 +1,4 @@
-import { PARTY_RULES, placementError } from '@doner-game/shared';
+import { PARTY_RULES, getTrap, trapOrientation, placementError } from '@doner-game/shared';
 import type { ArenaCommand, ArenaDefinition, ArenaSession, MatchSnapshot } from '@doner-game/shared';
 
 // No API client, account balances, storage or rewards in this adapter.
@@ -16,9 +16,9 @@ export function createLocalSession(arena: ArenaDefinition): ArenaSession {
         case 'PLACE': {
           if (snapshot.phase !== 'BUILD') return reject('Строительство завершено');
           if (snapshot.placements.some(p => p.round === snapshot.round)) return reject('Один бесплатный блок за раунд');
-          const error = placementError(arena, snapshot.placements, command.position);
+          const error = placementError(arena, snapshot.placements, command.position, PARTY_RULES.maxPlacements, command.trapId, command.orientation);
           if (error) return reject(error);
-          next = { ...snapshot, placements: [...snapshot.placements, { ...command.position, ...PARTY_RULES.basicPlatform, id: `${snapshot.matchId}:${snapshot.round}`, catalogId: 'basic-platform', ownerId: 'local-player', round: snapshot.round }] };
+          next = { ...snapshot, placements: [...snapshot.placements, { ...command.position, ...getTrap(command.trapId ?? 'basic-platform')!.dimensions, id: `${snapshot.matchId}:${snapshot.round}`, catalogId: command.trapId ?? 'basic-platform', orientation: trapOrientation(command.trapId ?? 'basic-platform', command.orientation)!, ownerId: 'local-player', round: snapshot.round }] };
           break;
         }
         case 'START_RACE':

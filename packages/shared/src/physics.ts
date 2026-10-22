@@ -1,3 +1,4 @@
+import type { PlayerLife } from './traps.js';
 import { overlaps } from './party.js';
 import type { Rect } from './party.js';
 
@@ -14,6 +15,7 @@ export const PLAYER_PHYSICS = {
 
 export interface PlayerControls { sequence: number; direction: -1 | 0 | 1; jump: number }
 export interface PhysicsPlayer {
+  life?: PlayerLife; windX?: number;
   playerId: string; seat: number; x: number; y: number; velocityX: number; velocityY: number;
   grounded: boolean; supportId: string | null; coyoteTicks: number; jumpBufferTicks: number;
   sequence: number; jumpSerial: number; direction: -1 | 0 | 1; active: boolean; finished: boolean;
@@ -55,13 +57,13 @@ function moveY(p: PhysicsPlayer, delta: number, solids: readonly Rect[], height:
 }
 
 /** Mutates only the supplied players. No clock, randomness, IO, Phaser, or character-specific rules. */
-export function stepPlayers(players: PhysicsPlayer[], controls: ReadonlyMap<string, PlayerControls>, solids: readonly Rect[], width: number, height: number): PlayerImpact[] {
+export function stepPlayers(players: PhysicsPlayer[], controls: ReadonlyMap<string, PlayerControls>, solids: readonly Rect[], width: number, height: number, forces: ReadonlyMap<string, { x: number; y: number; maxWind?: number }> = new Map()): PlayerImpact[] {
   const ordered = [...players].sort((a, b) => a.seat - b.seat || (a.playerId < b.playerId ? -1 : 1));
   const before = new Map(ordered.map(p => [p.playerId, { ...p }]));
   const jumped = new Set<string>(), impacts: PlayerImpact[] = [];
   const carriedX = new Map<string, number>();
   for (const p of ordered) {
-    if (p.finished) continue;
+    if (p.finished || (p.life && p.life.phase !== 'ALIVE')) continue;
     const input = p.active ? controls.get(p.playerId) : undefined;
     p.direction = input?.direction ?? 0;
     if (input && input.sequence >= p.sequence) {
@@ -77,10 +79,12 @@ export function stepPlayers(players: PhysicsPlayer[], controls: ReadonlyMap<stri
     // A rider's vertical motion is relative to its support; carry supplies world displacement.
     if (!jumped.has(p.playerId) && p.supportId && before.get(p.supportId)?.active && !before.get(p.supportId)?.finished) p.velocityY = 0;
     p.grounded = false; p.supportId = null;
-    p.velocityX = toward(p.velocityX, p.direction * cfg.speed, (p.direction ? cfg.acceleration : cfg.drag) * dt);
+    const force = p.active ? forces.get(p.playerId) : undefined;
+    if (force?.x || p.windX) p.windX = toward(p.windX ?? 0, force?.x ? Math.sign(force.x) * (force.maxWind ?? 70) : 0, (force?.x ? Math.abs(force.x) : 240) * dt);
+    p.velocityX = toward(p.velocityX, p.direction * cfg.speed + (p.windX ?? 0), (p.direction ? cfg.acceleration : cfg.drag) * dt);
     const dx = p.velocityX * dt;
     if (Math.abs(moveX(p, dx, solids, width) - dx) > eps) p.velocityX = 0;
-    p.velocityY = Math.min(cfg.maxFall, p.velocityY + cfg.gravity * dt);
+    p.velocityY = Math.min(cfg.maxFall, Math.max(-280, p.velocityY + (cfg.gravity + (force?.y ?? 0)) * dt));
     moveY(p, p.velocityY * dt, solids, height);
   }
   // A standing passenger follows a moving support, subject to world collisions.

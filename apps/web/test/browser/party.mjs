@@ -36,6 +36,7 @@ async function build(page, rightSteps = 0, upSteps = 0) {
   for (let i = 0; i < rightSteps; i++) await page.getByRole('button', { name: 'Блок вправо', exact: true }).click();
   for (let i = 0; i < upSteps; i++) await page.getByRole('button', { name: 'Блок вверх', exact: true }).click();
   await page.getByRole('button', { name: 'ПОСТАВИТЬ БЛОК', exact: true }).click();
+  await page.getByRole('button', { name: 'ЗАВЕРШИТЬ СТРОИТЕЛЬСТВО' }).click();
 }
 async function run(page, label) {
   await page.getByRole('heading', { name: /RACE/ }).waitFor();
@@ -95,7 +96,7 @@ try {
   assert.equal(await B.getByTestId('block-count').textContent(), '2/20'); checks++;
   // Run two independent Phaser simulations against one actual API.
   await Promise.all([run(A, 'A'), (async () => { await B.waitForTimeout(1000); await run(B, 'B'); })()]);
-  await A.locator('.finish-list').waitFor(); await B.locator('.finish-list').waitFor();
+  await A.locator('.finish-list').waitFor(); await A.getByText('Награды подтверждены сервером.', { exact: false }).waitFor(); await B.locator('.finish-list').waitFor(); await B.getByText('Награды подтверждены сервером.', { exact: false }).waitFor();
   assert.deepEqual(await A.locator('.finish-list').allTextContents(), await B.locator('.finish-list').allTextContents());
   assert.match(await A.locator('.finish-list').innerText(), /1\. Антон/); assert.match(await A.locator('.finish-list').innerText(), /2\. Айгерим/);
   await A.screenshot({ path: `${shots}/results.png`, fullPage: true }); checks++;
@@ -108,10 +109,11 @@ try {
   await A.getByRole('heading', { name: /RACE/ }).waitFor(); assert.equal(await A.getByTestId('block-count').textContent(), '4/20');
   await A.screenshot({ path: `${shots}/round-two.png`, fullPage: true }); checks++;
   await Promise.all([run(A, 'A-round2'), run(B, 'B-round2')]);
-  await A.locator('.finish-list').waitFor(); assert.deepEqual(await A.locator('.finish-list').allTextContents(), await B.locator('.finish-list').allTextContents()); checks++;
+  await A.locator('.finish-list').waitFor(); await A.getByText('Награды подтверждены сервером.', { exact: false }).waitFor(); assert.deepEqual(await A.locator('.finish-list').allTextContents(), await B.locator('.finish-list').allTextContents()); checks++;
+  const expectedBalance = Number((await A.getByTestId('doner-balance').innerText()).match(/\d+/)[0]);
   await A.evaluate(() => window.__back()); await A.getByRole('button', { name: 'ОСТАТЬСЯ' }).click();
   await A.evaluate(() => window.__back()); await A.getByRole('button', { name: 'ВЫЙТИ ИЗ КОМНАТЫ' }).click();
-  await A.getByRole('heading', { name: 'DONER GAME' }).waitFor(); assert.equal(await A.locator('canvas').count(), 0); assert.equal(await A.locator('.hud-coin').first().innerText(), 'DONER ×42');
+  await A.getByRole('heading', { name: 'DONER GAME' }).waitFor(); assert.equal(await A.locator('canvas').count(), 0); await A.waitForFunction(n => document.querySelector('.hud-coin')?.textContent === `DONER ×${n}`, expectedBalance);
   await a.context.close(); await b.context.close(); assert.deepEqual(errors, []);
   console.log(`PASS ${checks} real multiplayer browser checks (${production ? 'production' : 'development'})`);
 } finally { await browser.close(); backend.send('close'); await new Promise(resolve => backend.once('exit', resolve)); }

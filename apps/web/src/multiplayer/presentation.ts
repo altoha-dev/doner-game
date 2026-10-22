@@ -1,5 +1,5 @@
-import { overlaps, PLAYER_PHYSICS as cfg, playerBody, stepPlayers } from '@doner-game/shared';
-import type { ArenaDefinition, MovementSnapshot, NetworkPlayer, Point, Rect } from '@doner-game/shared';
+import { fanForces, overlaps, PLAYER_PHYSICS as cfg, playerBody, stepPlayers } from '@doner-game/shared';
+import type { ArenaDefinition, MovementSnapshot, NetworkPlayer, Point, Rect, TrapPlacement } from '@doner-game/shared';
 
 /** Timestamp history, independent of packet arrival cadence. No unbounded extrapolation. */
 export class SnapshotBuffer {
@@ -32,7 +32,8 @@ export class SnapshotBuffer {
       if (time > b.serverTime) continue;
       const alpha = Math.max(0, Math.min(1, (time - a.serverTime) / Math.max(1, b.serverTime - a.serverTime)));
       return b.players.map(p => {
-        const from = a.players.find(other => other.playerId === p.playerId) ?? p;
+        const previous = a.players.find(other => other.playerId === p.playerId) ?? p;
+        const from = (previous.life?.serial ?? 0) === (p.life?.serial ?? 0) ? previous : p;
         return { ...(alpha < .5 ? from : p), x: from.x + (p.x - from.x) * alpha, y: from.y + (p.y - from.y) * alpha,
           velocityX: from.velocityX + (p.velocityX - from.velocityX) * alpha, velocityY: from.velocityY + (p.velocityY - from.velocityY) * alpha };
       });
@@ -42,7 +43,7 @@ export class SnapshotBuffer {
     const stepMs = 1000 / cfg.tickHz;
     while (remaining > .001) {
       const previous = players.map(p => ({ ...p }));
-      stepPlayers(players, new Map(players.map(p => [p.playerId, { sequence: p.sequence, direction: p.direction, jump: p.jumpSerial }])), this.solids, this.arena.width, this.arena.height);
+      stepPlayers(players, new Map(players.map(p => [p.playerId, { sequence: p.sequence, direction: p.direction, jump: p.jumpSerial }])), this.solids, this.arena.width, this.arena.height, fanForces(players, this.solids.filter((s): s is TrapPlacement => 'catalogId' in s)));
       if (remaining < stepMs) players.forEach((p, i) => { p.x = previous[i]!.x + (p.x - previous[i]!.x) * remaining / stepMs; p.y = previous[i]!.y + (p.y - previous[i]!.y) * remaining / stepMs; });
       remaining -= stepMs;
     }
@@ -91,6 +92,9 @@ export class RacePresentation {
     const result = predicted.map(p => {
       if (p.playerId === this.localId || group.has(p.playerId)) return { ...p, x: p.x + offset.x, y: p.y + offset.y };
       const remote = buffered.find(q => q.playerId === p.playerId) ?? p;
+      // Never blend delayed pre-hit positions into a new life, even while the
+      // buffer's target time still precedes the hit/respawn snapshot.
+      if ((remote.life?.serial ?? 0) !== (p.life?.serial ?? 0)) return { ...p };
       const gap = Math.max(Math.abs(p.x - own.x) - cfg.width, Math.abs(p.y - own.y) - cfg.height, 0);
       const weight = p.active ? Math.max(0, Math.min(1, (radius - gap) / (radius - cfg.renderMaxOffset))) : 0;
       // Continuous transition into a shared contact timeline, instead of a binary proximity switch.

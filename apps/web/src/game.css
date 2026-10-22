@@ -45,3 +45,18 @@
 .app-shell--game .footer { margin-top: 12px; padding-top: 10px; }
 @media (max-height: 650px) { .phaser-host { height: 224px; } .phase-hud { margin: 4px 0; } .round-strip { margin-top: 6px; } .game-controls { margin-top: 10px; } .game-control { min-height: 56px; } .game-keyboard-hint { display: none; } }
 .network-debug { position: absolute; top: 4px; right: 4px; z-index: 20; margin: 0; padding: 5px; background: #101e38e8; color: #c5e7dd; font: 9px/1.4 monospace; pointer-events: none; white-space: pre-wrap; max-width: calc(100% - 8px); }
+.trap-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.trap-picker .block-picker { display: flex; flex-direction: column; align-items: center; min-height: 72px; padding: 6px 2px; font: 9px var(--font-mono); word-break: normal; }
+.trap-picker button[aria-pressed=true] { border-color: #ffb66d; background: #36516a; }
+.trap-picker small { font-size: 8px; }
+.trap-swatch { font-size: 24px; line-height: 28px; color: #c6a180; }
+.trap-swatch--air { color: #9ddfe9; }.trap-swatch--projectile { color: #ffbf8b; }
+.test-loadout, .trap-description { font: 10px/1.5 var(--font-mono); color: #bed7db; margin: 4px 0; }
+.trap-rotate { min-height: 44px; width: 100%; font-size: 11px; }
+
+.match-scoreboard { margin-top: 12px; padding: 12px; font: 11px/1.6 var(--font-mono); }
+.match-scoreboard > div { display: flex; justify-content: space-between; gap: 12px; }
+.match-scoreboard p { color: #ffbf8b; }
+.shop-balance { font: 12px var(--font-mono); color: #ffbf8b; }
+.trap-picker small { white-space: normal; line-height: 1.4; }
+.finish-list li { flex-wrap: wrap; gap: 5px; }

@@ -1,3 +1,6 @@
+import { getTrap, trapOrientation } from './traps.js';
+import type { Orientation, TrapId } from './traps.js';
+import { hasGeometricRoute } from './solvability.js';
 import type { CharacterId } from './characters.js';
 
 export type MatchPhase = 'LOBBY' | 'BUILD' | 'RACE' | 'RESULTS' | 'MATCH_FINISHED';
@@ -13,8 +16,8 @@ export interface ArenaDefinition {
   readonly protectedAreas: readonly Rect[];
 }
 export interface TrapPlacement extends Rect {
-  readonly id: string; readonly catalogId: 'basic-platform';
-  readonly ownerId: string; readonly round: number;
+  readonly id: string; readonly catalogId: TrapId; readonly orientation?: Orientation;
+  readonly ownerId: string; readonly round: number; readonly slot?: 1 | 2; readonly cost?: number;
 }
 export interface RoundResult { readonly round: number; readonly elapsedMs: number; readonly playerId: string }
 export interface MatchSnapshot {
@@ -24,7 +27,7 @@ export interface MatchSnapshot {
 }
 // Transport-neutral boundary. The future server will own snapshots and validate commands.
 export type ArenaCommand =
-  | { type: 'PLACE'; position: Point }
+  | { type: 'PLACE'; position: Point; trapId?: TrapId; orientation?: Orientation }
   | { type: 'START_RACE' }
   | { type: 'FINISH_LOCAL'; elapsedMs: number }
   | { type: 'NEXT_ROUND' };
@@ -82,12 +85,15 @@ export function overlaps(a: Rect, b: Rect): boolean {
 export function snapToGrid(point: Point, grid: number): Point {
   return { x: Math.round(point.x / grid) * grid, y: Math.round(point.y / grid) * grid };
 }
-export function placementError(arena: ArenaDefinition, placements: readonly TrapPlacement[], point: Point, limit: number = PARTY_RULES.maxPlacements): string | null {
+export function placementError(arena: ArenaDefinition, placements: readonly TrapPlacement[], point: Point, limit: number = PARTY_RULES.maxPlacements, trapId: unknown = 'basic-platform', orientation?: unknown): string | null {
+  const trap = getTrap(trapId);
+  if (!trap || !trapOrientation(trapId, orientation)) return 'Неизвестный объект или направление';
   if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x % arena.grid || point.y % arena.grid) return 'Нужна позиция на сетке';
   if (placements.length >= limit) return 'Достигнут лимит блоков';
-  const block = { ...point, ...PARTY_RULES.basicPlatform };
+  const block = { ...point, ...trap.dimensions };
   if (arena.protectedAreas.some(area => overlaps(area, block))) return 'Старт и финиш защищены';
   if (!arena.placementAreas.some(a => block.x >= a.x && block.y >= a.y && block.x + block.width <= a.x + a.width && block.y + block.height <= a.y + a.height)) return 'Вне зоны строительства';
   if ([...arena.geometry, ...placements].some(solid => overlaps(solid, block))) return 'Здесь уже есть платформа';
+  if (!hasGeometricRoute(arena, [...arena.geometry, ...placements, block])) return 'Нельзя перекрыть путь к финишу';
   return null;
 }

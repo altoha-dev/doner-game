@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
-import { ONLINE_RULES } from '@doner-game/shared';
-import type { ArenaSession, BuildPreview, ClientEvents, MatchSnapshot, MovementSnapshot, OnlineRoom, Point, RaceInputBatch, RoomCommand, RoomReply, ServerEvents } from '@doner-game/shared';
+import { ONLINE_RULES, trapOrientation } from '@doner-game/shared';
+import type { ArenaSession, BuildPreview, ClientEvents, MatchSnapshot, MovementSnapshot, OnlineRoom, Point, RaceInputBatch, RoomCommand, RoomReply, ServerEvents, TrapId, Orientation } from '@doner-game/shared';
 import { NetworkDiagnostics } from './diagnostics';
 
 export interface ConnectionView {
@@ -16,7 +16,7 @@ export interface NetworkBridge {
   diagnostics: NetworkDiagnostics | undefined;
   subscribeMovement(listener: (snapshot: MovementSnapshot, reset: boolean) => void): () => void;
   getMovement(): MovementSnapshot | null;
-  setPreview(position: Point | null): void;
+  setPreview(position: Point | null, trapId?: TrapId, orientation?: Orientation): void;
   getPreviews(): readonly BuildPreview[];
   subscribePreviews(listener: () => void): () => void;
 }
@@ -26,6 +26,7 @@ export function createRoomConnection(url: string, token: string, userId: string)
   let destroyed = false, movement: MovementSnapshot | null = null;
   const diagnostics = import.meta.env.DEV ? new NetworkDiagnostics() : undefined;
   let previewSequence = 0, receivedPreviewSequence = -1, intent: Point | null = null, sentPreview = '', sentAt = 0;
+  let previewTrap: TrapId = 'basic-platform', previewOrientation: Orientation = 'none';
   const expiry = new Map<string, number>();
   const listeners = new Set<() => void>(), motionListeners = new Set<(s: MovementSnapshot, reset: boolean) => void>(), previewListeners = new Set<() => void>();
   const socket: Socket<ServerEvents, ClientEvents> = io(url, { auth: { token }, autoConnect: false, reconnection: true, reconnectionDelay: 500, reconnectionDelayMax: 4000, timeout: 8000, transports: ['websocket', 'polling'], tryAllTransports: true });
@@ -83,11 +84,11 @@ export function createRoomConnection(url: string, token: string, userId: string)
   function flushPreview() {
     const room = view.room, now = Date.now();
     if (!socket.connected || destroyed || room?.match.phase !== 'BUILD' || room.players.find(p => p.playerId === userId)?.buildDone) return;
-    const key = `${room.match.round}:${intent ? `${intent.x}:${intent.y}` : 'none'}`;
+    const key = `${room.match.round}:${previewTrap}:${previewOrientation}:${intent ? `${intent.x}:${intent.y}` : 'none'}`;
     if (key === sentPreview && (!intent || now - sentAt < ONLINE_RULES.previewHeartbeatMs)) return;
     if (now - sentAt < 1000 / ONLINE_RULES.previewHz) return;
     sentAt = now; sentPreview = key;
-    socket.volatile.emit('build:preview', { round: room.match.round, sequence: ++previewSequence, objectType: 'basic-platform', position: intent ? { ...intent } : null });
+    socket.volatile.emit('build:preview', { round: room.match.round, sequence: ++previewSequence, objectType: previewTrap, orientation: previewOrientation, position: intent ? { ...intent } : null });
   }
   const previewTimer = setInterval(() => {
     flushPreview();
@@ -99,7 +100,7 @@ export function createRoomConnection(url: string, token: string, userId: string)
     localId: userId, diagnostics, getRoom: () => view.room, getMovement: () => movement, isConnected: () => view.status === 'connected',
     sendInput(input) { if (input.frames.length && socket.connected && view.status === 'connected') socket.volatile.emit('race:input', input); },
     subscribeMovement(fn) { motionListeners.add(fn); return () => { motionListeners.delete(fn); }; },
-    setPreview(position) { intent = position; flushPreview(); },
+    setPreview(position, trapId = 'basic-platform', orientation) { intent = position; previewTrap = trapId; previewOrientation = trapOrientation(trapId, orientation)!; flushPreview(); },
     getPreviews: () => view.previews,
     subscribePreviews(fn) { previewListeners.add(fn); return () => { previewListeners.delete(fn); }; },
   };
@@ -108,7 +109,7 @@ export function createRoomConnection(url: string, token: string, userId: string)
     dispatch(command) {
       const room = view.room;
       if (!room || view.status !== 'connected' || view.pending) return { ok: false, reason: 'Дождитесь соединения и ответа сервера.' };
-      if (command.type === 'PLACE') void request({ type: 'PLACE', position: command.position, round: room.match.round, expectedRevision: room.revision, commandId: crypto.randomUUID() });
+      if (command.type === 'PLACE') void request({ type: 'PLACE', position: command.position, ...(command.trapId ? { trapId: command.trapId } : {}), ...(command.orientation ? { orientation: command.orientation } : {}), round: room.match.round, expectedRevision: room.revision, commandId: crypto.randomUUID() });
       else if (command.type === 'NEXT_ROUND') void request({ type: 'NEXT' });
       else return { ok: false, reason: 'Фазой управляет сервер.' };
       return { ok: true };

@@ -43,3 +43,8 @@ export interface ApiErrorDto {
 
 export * from './online.js';
 export * from './physics.js';
+
+export * from './traps.js';
+export * from './trapSimulation.js';
+
+export * from './economy.js';

@@ -1,6 +1,6 @@
-# Multiplayer architecture — Stage 6.1.6
+# Multiplayer architecture — Stage 6.3
 
-Описание **v0.6.1.6 Network Physics Smoothing**. Проверки и ручной Telegram smoke — в [отчёте](STAGE_6_1_6_REPORT.md).
+Описание **v0.6.3 Doner Economy & Trap Shop**. Проверки, ограничения и ручной Telegram smoke — в [отчёте](STAGE_6_3_REPORT.md).
 
 ## Transport и identity
 
@@ -22,8 +22,8 @@ Room code — 6 криптографически случайных символ
 | server → members | `room:snapshot` | полный OnlineRoom с revision, players, MatchSnapshot, placements, finishes |
 | client → server | `race:input` | round, frames[1..6]: sequence, direction −1/0/1, monotonic jump counter |
 | DEV client → server | `net:ping` + ack | без payload, authenticated/rate-limited, клиент измеряет RTT |
-| server → members | `race:snapshot` | room/round, sequence, serverTime/tick, authoritative players + contact impacts |
-| client → server | `build:preview` | round, sequence, basic-platform, position или null для отмены |
+| server → members | `race:snapshot` | room/round, sequence, serverTime/tick, authoritative players/life + contact impacts + traps{tick,projectiles,hits} |
+| client → server | `build:preview` | round, sequence, objectType, orientation, position или null для отмены |
 | server → members | `build:previews` | текущие previews с trusted owner/seat/name, validity/reason и expiry |
 | server → client | `session:error` | безопасный код и сообщение |
 
@@ -49,17 +49,17 @@ TTL/CLOSE/последний LEAVE закрывают комнату из люб
 
 ## Общий BUILD
 
-Один бесплатный BASIC PLATFORM BLOCK 32×16 на участника за раунд либо SKIP. PLACE содержит commandId, round, expectedRevision, position. Проверяются membership/phase/round/revision, личный лимит, grid 16, bounds/protected zones, geometry/block overlaps и максимум 20 блоков. Валидация и запись сериализованы: два запроса не займут одно место.
+Один бесплатный BLOCK32×16, затем необязательный EXTRA за1; либо FAN2/CROSSBOW3 в первом слоте с немедленным завершением хода. SKIP завершает оставшиеся слоты бесплатно. PLACE содержит commandId, round, expectedRevision, position, trapId и orientation; legacy отсутствие последних двух означает basic-platform/none. Shared каталог ограничивает допустимые типы/направления. Проверяются membership/phase/round/revision, личный лимит, grid 16, bounds/protected zones, geometry/object overlaps, geometric route и максимум20 объектов. Валидация и запись сериализованы: два запроса не займут одно место.
 
-Повтор принятого commandId с теми же owner/round/coordinates возвращает snapshot без новой записи. Изменённый повтор отклоняется. При устаревшей revision UI сохраняет preview и показывает ошибку; игрок подтверждает актуальное состояние повторно. Физический блок появляется только из server snapshot. NEXT сохраняет блоки. Глобальная проходимость не доказана; timeout завершает непроходимый RACE.
+Повтор принятого commandId с теми же owner/round/coordinates/type/orientation возвращает snapshot без новой записи. Изменённый повтор отклоняется. При устаревшей revision UI сохраняет preview и показывает ошибку; игрок подтверждает актуальное состояние повторно. Физический блок появляется только из server snapshot. NEXT сохраняет все типы и направления. Geometric route guard проверяет body clearance и доступную высоту подъёма; динамическая проходимость с FAN/снарядами не доказана, timeout завершает RACE.
 
 `previews.ts` хранит только ephemeral Map по room/user/round. Клиент отправляет изменения до 12 Hz и heartbeat 500ms; сервер отбрасывает старые sequence, чужой round и завершённый ход, сам вычисляет placement validity. Broadcast ограничен 15 Hz и только socket room. SQL/room revision/geometry не меняются. TTL 1800ms, cancel/null, confirm, SKIP, disconnect, LEAVE, конец BUILD и закрытие комнаты удаляют preview. Confirm пересчитывает валидность оставшихся ghosts. При reconnect выдаются свежие previews других участников; replacement socket сбрасывает собственную sequence.
 
-Ghost: полупрозрачная заливка цвета seat, рамка и ✓/×, Telegram display name. Invalid рамка/текст красные. Цвет принадлежит игроку, не выбранному персонажу. BUILD status выводится из placement текущего раунда, buildDone, presence и preview: ВЫБИРАЕТ БЛОК / ВЫБИРАЕТ МЕСТО / ПОСТАВИЛ БЛОК / ПРОПУСТИЛ / ОТКЛЮЧЁН. Новых DB полей нет.
+Ghost: полупрозрачная заливка цвета seat, рамка и ✓/×, Telegram display name. Invalid рамка/текст красные. Цвет принадлежит игроку, не выбранному персонажу. BUILD status выводится из placement текущего раунда, buildDone, presence и preview: ВЫБИРАЕТ БЛОК / ВЫБИРАЕТ МЕСТО / ПОСТАВИЛ БЛОК / ПОСТАВИЛ ЛОВУШКУ / ПРОПУСТИЛ / ОТКЛЮЧЁН. Preview не пишет в БД; подтверждённая orientation сохраняется новым полем TrapPlacement.
 
 ## Phaser, движение, финиш
 
-Один `GameScreen`/`createGame` обслуживает local session и сетевой `ArenaSession` adapter. Training сохраняет Arcade physics; online Arcade world приостановлен и отображает общий solver из `packages/shared/src/physics.ts`. Body 10×21 и все параметры `PLAYER_PHYSICS` одинаковы для четырёх персонажей. Remote actors — непрозрачные sprites с именем из профиля до 20 Unicode символов; близкие подписи разнесены по высоте.
+Один `GameScreen`/`createGame` обслуживает local session и сетевой `ArenaSession` adapter. Training с FAN/CROSSBOW использует shared TrapSimulation, block-only сохраняет Arcade physics; online Arcade world приостановлен и отображает общий solver из `packages/shared/src/physics.ts`. Body 10×21 и все параметры `PLAYER_PHYSICS` одинаковы для четырёх персонажей. Remote actors — непрозрачные sprites с именем из профиля до 20 Unicode символов; близкие подписи разнесены по высоте.
 
 `race.ts` симулирует мир фиксированными шагами 60 Hz, максимум 6 catch-up steps. Один input sequence обозначает один physics step. Клиент сохраняет frame history и отправляет хвост до 6 команд примерно 20 Hz (повтор последних команд покрывает краткий пропуск отправки). Частоты input/snapshots не увеличены; input payload теперь содержит несколько frames вместо одного. Валидатор проверяет contiguous sequences, monotonic jump counter, round, bounds и отсутствие чужих полей. Сервер потребляет один frame за tick, дедуплицирует очередь и подтверждает обработанный frame clock в NetworkPlayer.sequence. Пропущенный frame использует последнее намерение; поздняя новая команда обновляет liveness/edge, но не прокручивает мир назад и не добавляет шагов. Будущая очередь ограничена 24 steps. Input старше 300ms отключает контактное тело до новых команд, gravity остаётся. Позиции и previews не записываются в SQL. Snapshots публикуются примерно 15 Hz.
 
@@ -73,7 +73,7 @@ DEV `?netdebug=1` показывает RTT, arrival jitter, server tick, snapsho
 
 Пересечение **серверного** тела с finish ставит результат в существующую очередь. Rank определяется порядком обнаружения серверной симуляцией, в одном обновлении — стабильным seat order. Клиент не задаёт rank/time и не отправляет FINISH. Результат публикуется после DB commit. Unique room/round/user и room/round/rank защищают от дубликатов. При LEAVE физическое тело удаляется только после успешного commit, ошибка записи сохраняет прежнее membership/body до retry.
 
-**Online physics server-authoritative:** coordinate packets не двигают игрока. Это небольшой AABB solver, без rollback/lag compensation, сложных rigid bodies или движущихся ловушек. При задержке выше окна prediction, jitter/loss или перегрузке возможна заметная коррекция; remote prediction не знает будущего input друга. 300ms timeout намеренно прекращает контакты зависшего клиента. Latency влияет на результат, экономика по-прежнему отсутствует.
+**Online physics server-authoritative:** coordinate packets не двигают игрока. Это небольшой AABB solver, без rollback/lag compensation, сложных rigid bodies или движущихся ловушек. При задержке выше окна prediction, jitter/loss или перегрузке возможна заметная коррекция; remote prediction не знает будущего input друга. 300ms timeout намеренно прекращает контакты зависшего клиента. Latency влияет на порядок финиша и результат.
 
 ## Reconnect, выход, restart
 
@@ -92,11 +92,37 @@ Additive migration `20261020000000_party_rooms`:
 | Room | UUID, unique code, host/capacity/phase/round/revision/deadlines/TTL |
 | RoomPlayer | PK room/user, nullable unique activeUserId, room character/ready/presence/seat/buildDone |
 | MatchRound | PK room/round, phase, startedAt/endedAt |
-| TrapPlacement | commandId PK, unique room/round/user, type/grid coordinates |
+| TrapPlacement | commandId PK, unique room/round/user/slot, type/grid coordinates/cost |
 | RoundFinish | PK room/round/user, unique room/round/rank, status/server time |
 
-Room = один match, matchId = roomId; отдельный Match не требуется. User/PlayerProgress/UnlockedCharacter и старые migrations сохранены. Multiplayer store не пишет в PlayerProgress. Profile/unlock endpoints остаются совместимыми, lobby их не вызывает.
+Room = один match, matchId = roomId; отдельный Match не требуется. User/PlayerProgress/UnlockedCharacter и старые migrations сохранены. Multiplayer store атомарно меняет только PlayerProgress.doners с записью ledger. Profile/unlock endpoints остаются совместимыми, lobby их не вызывает.
 
 **Только один активный API instance, включая обновления.** Нет Redis adapter, распределённого ownership или leader lease. CAS защищает запись, но не координирует два сервера. При обновлении после 6.1 остановить прежний instance до старта нового, допустить короткое обслуживание и безопасный abort гонки. Railway rolling overlap сам по себе не решает эту задачу. [Railway deployment teardown](https://docs.railway.com/deployments/deployment-teardown).
 
 Completed rows сохраняются, автоматической retention policy нет. Общая очередь и lifecycle DB writes ограничивают масштаб. Deadline UI использует часы телефона; серверный deadline остаётся authority. Перед масштабированием нужны ownership/leases, retention, нагрузочные/latency проверки. Пакетный протокол движения 6.1.6 несовместим с клиентом 6.1.5 и старше: API/frontend обновлять согласованно с reload открытых Mini Apps. Новых env/migrations в 6.1.6 нет.
+
+## Trap world Stage 6.2
+
+`traps.ts` — metadata/catalog, `trapSimulation.ts` — authoritative fixed-step hazards, `solvability.ts` — placement route guard. Расширение `stepPlayers` принимает bounded external forces, не заменяет contact solver. `fanForces` вызывается одинаково сервером, client prediction/replay и bounded remote extrapolation. Лимит бокового ветра приходит из каталога. Input/ack sequence, число replay steps, contact corrections и interpolation Stage 6.1.6 сохранены.
+
+В каждом RACE сервер создаёт TrapSimulation из подтверждённых placements. Тик60Hz: lifecycle → existing player solver с fan forces → периодические projectiles → continuous segment/body/solid collision. Никаких SQL в этом пути; persisted только placement и прежние state/finish transitions. Snapshot15Hz несёт tick, максимум32 projectiles/16 recent hit effects и life на players. Клиент не отправляет hits, силы, позиции или projectile config.
+
+Phaser рисует актуальные базы, bounded interpolation/extrapolation снарядов (≤66.7ms, остановка у solid), воздушные частицы, warnings и HIT. Клиент не объявляет попадание: life приходит от authority. HIT8ticks → RESPAWNING24ticks → spawn + immunity60ticks. Life serial увеличивается на hit и respawn, сбрасывает старое pending input/render offset. Интерполяция remote не смешивает разные life serial. Server удаляет input stream неактивной life; stale frames не вызывают повторное попадание/прыжок. Respawn является явным изменением игрового состояния, не скрывается как обычная коррекция.
+
+Повторное подключение получает layout и snapshot активного мира с текущими life/tick/projectiles. NEXT создаёт новый hazard clock при сохранении placements; новая комната пустая. API restart сохраняет placement layout в SQL и прерывает активную RACE по прежнему recovery contract; projectiles/life не сохраняются в БД и не восстанавливаются через restart.
+
+Migration `20261021000000_trap_orientation` добавляет `TrapPlacement.orientation TEXT NOT NULL DEFAULT 'none'`. Store теперь восстанавливает objectType через каталог вместо жёстко заданного block. Старые rows совместимы. Новых runtime env нет; API и web обновлять согласованно, reload клиентов обязателен для доступа к новым типам.
+
+Spawn/finish защищены от placement, но летящий снаружи снаряд может пересечь spawn: новая life защищена60ticks. Route check — grid4, body10×21, ascent36px; допускает горизонтальный поиск без точного flight-time, не доказывает динамическую достижимость. Это ограничение тестового прототипа, а не обещание всех комбинаций ловушек.
+
+## Economy Stage 6.3
+
+`shared/economy.ts` содержит цены, правила двух слотов, eligibility/reward table и выбор победителей. Запрос PLACE прежний: клиент не передаёт цену, баланс, slot, очки или награду. `store.save` внутри одной PostgreSQL transaction выполняет Room revision CAS, проверку persisted slots, conditional debit `doners >= cost`, ledger insert и placement insert. При любой ошибке откатывается весь набор; snapshot/ACK публикуются только после commit. Unique commandId/ledger purchase key исключают повторное списание, включая потерянный ACK/reconnect/restart. Одновременные старые profile purchases используют тот же conditional balance update.
+
+RaceSimulation.input возвращает только признак принятого свежего input; solver не меняется. Первый непустой input участника сохраняет playedIds через очередь RoomManager один раз за раунд; SQL не выполняется на каждом физическом тике. ParticipantIds фиксируются из подключённых участников при старте гонки. Координаты и результаты по-прежнему считает сервер.
+
+На RESULTS сохраняются FINISHED/DNF/ABORTED и PENDING. Settlement берёт блокировки Room → MatchRound, читает persisted finishes/participation, в стабильном порядке userId атомарно обновляет Doner + ledger + RoundFinish rewards + RoomPlayer score + SETTLED + Room revision. Уникальны reward key(room,round,user), отдельный partial unique index и purchase placementId. Победитель получает ledger с amount0. DNF/idle/solo/ABORTED не оплачиваются. Повторный SETTLED no-op; failure оставляет PENDING и автоматически повторяется с2s backoff, включая перезапуск сервера и закрытую комнату. NEXT до SETTLED запрещён. Legacy rounds по умолчанию LEGACY, без ретроактивных наград.
+
+Room snapshots несут подтверждённые balances, reward state и cumulative scores. UI не вычитает деньги оптимистично; RESUME заново читает баланс без revision churn, выход обновляет /me. Итоговая таблица показывает общий максимум, несколько лидеров делят победу. Полностью завершённая комната исключается из active membership: reload после закрытия возвращает Home, история в БД сохраняется.
+
+Additive migration `20261022000000_doner_economy` создаёт DonerTransaction, slot/cost, settlement/participation и reward/score fields; старые данные и миграции не изменяются. Проверка upgrade использует только пустую новую localhost *_upgrade_test: сначала old schema, затем legacy fixture и pending migrations, без reset. Новых runtime env нет. Одновременно должен работать один RoomManager/API instance; проверки с restart нельзя запускать параллельно на одной тестовой БД.

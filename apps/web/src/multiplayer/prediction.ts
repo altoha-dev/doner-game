@@ -1,5 +1,5 @@
-import { createPhysicsPlayer, PLAYER_PHYSICS, stepPlayers } from '@doner-game/shared';
-import type { ArenaDefinition, MovementSnapshot, NetworkPlayer, OnlineRoom, PlayerControls, RaceControls, RaceInputBatch, Rect } from '@doner-game/shared';
+import { createPhysicsPlayer, fanForces, PLAYER_PHYSICS, stepPlayers } from '@doner-game/shared';
+import type { ArenaDefinition, MovementSnapshot, NetworkPlayer, OnlineRoom, PlayerControls, RaceControls, RaceInputBatch, Rect, TrapPlacement } from '@doner-game/shared';
 
 /** Shared solver prediction. Only the server can accept positions, contacts or finishes. */
 export class RacePrediction {
@@ -12,12 +12,14 @@ export class RacePrediction {
   private serverTick = -1;
   private remoteSteps = 0;
   lastCorrection = { distance: 0, reset: false };
+  private placements: readonly TrapPlacement[] = [];
   private solids: readonly Rect[] = [];
   constructor(readonly localId: string, private arena: ArenaDefinition) {}
   begin(room: OnlineRoom) {
     this.round = room.match.round; this.sequence = 0; this.jump = 0; this.pending = [];
     this.snapshotSequence = -1; this.serverTick = -1; this.remoteSteps = 0;
     this.lastCorrection = { distance: 0, reset: true };
+    this.placements = room.match.placements;
     this.solids = [...this.arena.geometry, ...room.match.placements];
     this.players = room.players.filter(p => !p.left).map(p => {
       const spawn = this.arena.spawns[p.seat]!;
@@ -29,7 +31,8 @@ export class RacePrediction {
     if (snapshot.round !== this.round || (!reset && (snapshot.sequence <= this.snapshotSequence || snapshot.tick < this.serverTick))) return false;
     const me = snapshot.players.find(p => p.playerId === this.localId); if (!me) return;
     const before = this.own && { x: this.own.x, y: this.own.y };
-    const resync = (reset && this.serverTick >= 0) || this.sequence - me.sequence > PLAYER_PHYSICS.maxPredictionSteps;
+    const lifeChanged = (this.own?.life?.serial ?? 0) !== (me.life?.serial ?? 0);
+    const resync = lifeChanged || (reset && this.serverTick >= 0) || this.sequence - me.sequence > PLAYER_PHYSICS.maxPredictionSteps;
     if (resync) { this.pending = []; this.sequence = me.sequence; this.jump = me.jumpSerial; }
     this.snapshotSequence = snapshot.sequence; this.serverTick = snapshot.tick; this.remoteSteps = 0;
     this.sequence = Math.max(this.sequence, me.sequence); this.jump = Math.max(this.jump, me.jumpSerial);
@@ -52,9 +55,9 @@ export class RacePrediction {
     this.remoteSteps++;
     const controls = new Map<string, PlayerControls>();
     for (const p of this.players) {
-      if (p.playerId === this.localId) { p.active = !p.finished; controls.set(p.playerId, input); }
+      if (p.playerId === this.localId) { p.active = !p.finished && (!p.life || p.life.phase === 'ALIVE'); controls.set(p.playerId, input); }
       else controls.set(p.playerId, { sequence: p.sequence, direction: this.remoteSteps <= PLAYER_PHYSICS.remotePredictionSteps ? p.direction : 0, jump: p.jumpSerial });
     }
-    stepPlayers(this.players, controls, this.solids, this.arena.width, this.arena.height);
+    stepPlayers(this.players, controls, this.solids, this.arena.width, this.arena.height, fanForces(this.players, this.placements));
   }
 }

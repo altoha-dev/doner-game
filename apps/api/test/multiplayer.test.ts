@@ -15,7 +15,23 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 type Client = Socket<ServerEvents, ClientEvents>;
 async function until(check: () => boolean | Promise<boolean>, ms = 4000) { const stop = Date.now() + ms; while (!await check()) { if (Date.now() > stop) assert.fail('Timed out'); await sleep(20); } }
 
-test('real Socket.IO + PostgreSQL shared match, authorization, recovery and unchanged balances', { skip: !url && 'Requires isolated TEST_DATABASE_URL', timeout: 60000 }, async t => {
+// These pre-economy regression scenarios exercise one placement per turn; explicitly decline EXTRA.
+async function regressionCommand(socket: Client, command: RoomCommand) {
+  if (command.type === 'NEXT') {
+    await until(async () => { const r = await socket.timeout(3000).emitWithAck('room:command', {type:'RESUME'}); return r.ok && !r.room?.rounds?.some(x=>x.status==='PENDING'); });
+  }
+  let reply = await socket.timeout(3000).emitWithAck('room:command', command);
+  if (reply.ok && command.type === 'PLACE' && (command.trapId ?? 'basic-platform') === 'basic-platform' && reply.room?.match.phase === 'BUILD') {
+    const owner = reply.room.match.placements.find(p=>p.id===command.commandId)?.ownerId;
+    if (!reply.room.players.find(p=>p.playerId===owner)?.buildDone) reply = await socket.timeout(3000).emitWithAck('room:command', {type:'SKIP',round:command.round});
+  }
+  return reply;
+}
+async function ledgerBalance(db: ReturnType<typeof createDatabase>, userId: string) {
+  return 42 + ((await db.donerTransaction.aggregate({where:{userId},_sum:{amount:true}}))._sum.amount ?? 0);
+}
+
+test('real Socket.IO + PostgreSQL shared match, authorization, recovery and preserved progress', { skip: !url && 'Requires isolated TEST_DATABASE_URL', timeout: 60000 }, async t => {
   assert.ok(url); assert.match(new URL(url).pathname, /_test$/);
   const db = createDatabase(url), players = createPlayerStore(db);
   const cfg = { ...config, databaseUrl: url, botUsername: 'doner_test_bot' };
@@ -39,7 +55,7 @@ test('real Socket.IO + PostgreSQL shared match, authorization, recovery and unch
   }
   const A = await connect(a.accessToken), B = await connect(b.accessToken), C = await connect(c.accessToken);
   const request = (socket: Client, command: RoomCommand) => socket.timeout(3000).emitWithAck('room:command', command);
-  const ok = async (socket: Client, command: RoomCommand) => { const reply = await request(socket, command); assert.equal(reply.ok, true, JSON.stringify(reply)); if (!reply.ok) throw new Error(); return reply.room!; };
+  const ok = async (socket: Client, command: RoomCommand) => { const reply = await regressionCommand(socket, command); assert.equal(reply.ok, true, JSON.stringify(reply)); if (!reply.ok) throw new Error(); return reply.room!; };
   const fail = async (socket: Client, command: RoomCommand, code: string) => { const reply = await request(socket, command); assert.equal(reply.ok, false); if (!reply.ok) assert.equal(reply.code, code); };
   let stateA: OnlineRoom | null = null, stateB: OnlineRoom | null = null;
   A.on('room:snapshot', r => { stateA = r; }); B.on('room:snapshot', r => { stateB = r; });
@@ -71,7 +87,7 @@ test('real Socket.IO + PostgreSQL shared match, authorization, recovery and unch
     room = await ok(winner, { type: 'RESUME' });
     await fail(loser, { ...placeA, commandId: randomUUID(), expectedRevision: room.revision }, 'INVALID_PLACEMENT');
     const duplicate = winner === A ? placeA : placeB;
-    assert.equal((await ok(winner, duplicate)).match.placements.length, 1);
+    room = await ok(winner, duplicate); assert.equal(room.match.placements.length, 1);
     room = await ok(loser, { ...placeA, commandId: randomUUID(), expectedRevision: room.revision, position: { x: 224, y: 176 } });
     assert.equal(room.match.placements.length, 2); assert.equal(room.match.phase, 'RACE');
     await fail(A, { ...placeA, commandId: randomUUID(), expectedRevision: room.revision }, 'WRONG_PHASE');
@@ -144,7 +160,7 @@ test('real Socket.IO + PostgreSQL shared match, authorization, recovery and unch
     await assert.rejects(connect('invalid'), /INVALID_ACCESS_TOKEN/);
     await assert.rejects(connect(app.jwt.sign({ sub: a.user.id }, { expiresIn: -1 })), /INVALID_ACCESS_TOKEN/);
     await assert.rejects(connect(app.jwt.sign({ sub: randomUUID() })), /INVALID_ACCESS_TOKEN/);
-    for (const id of ids) { const p = await players.findById(id); assert.equal(p?.progress.doners, 42); assert.equal(p?.progress.goldenDoners, 3); assert.deepEqual(p?.progress.unlockedCharacterIds, ['altoha']); }
+    for (const id of ids) { const p = await players.findById(id); assert.equal(p?.progress.doners, await ledgerBalance(db,id)); assert.equal(p?.progress.goldenDoners, 3); assert.deepEqual(p?.progress.unlockedCharacterIds, ['altoha']); }
     assert.equal((await app.inject({ url: '/health' })).statusCode, 200);
     assert.equal((await app.inject({ url: '/me', headers: { authorization: `Bearer ${a.accessToken}` } })).statusCode, 200);
   });
@@ -185,7 +201,7 @@ test('Stage 6.1.5 real clients: previews, authoritative body contacts, head jump
   const a = await login(0), b = await login(1), c = await login(2);
   let A = await connect(a), B = await connect(b); const C = await connect(c);
   const ok = async (socket: Client, command: RoomCommand) => {
-    const reply = await socket.timeout(3000).emitWithAck('room:command', command); assert.equal(reply.ok, true, JSON.stringify(reply));
+    const reply = await regressionCommand(socket, command); assert.equal(reply.ok, true, JSON.stringify(reply));
     if (!reply.ok) throw new Error(reply.message); return reply.room!;
   };
   let room = await ok(A, { type: 'CREATE', capacity: 4 }); roomIds.push(room.roomId);
@@ -270,7 +286,7 @@ test('Stage 6.1.5 real clients: previews, authoritative body contacts, head jump
     assert.ok(state(b.user.id).x > before + 5, 'server pushes stationary player');
     await until(() => latest.get(a.user.id)?.sequence === latest.get(b.user.id)?.sequence);
     assert.deepEqual(latest.get(a.user.id)?.players, latest.get(b.user.id)?.players);
-    assert.equal(manager.current(a.user.id)!.revision, revision, 'motion does not persist room state');
+    assert.ok(manager.current(a.user.id)!.revision <= revision + 2, 'at most one durable participation write per player; no per-tick persistence');
   });
   await t.test('land on another head and jump from it through input alone', async () => {
     await sleep(200);
@@ -318,6 +334,110 @@ test('Stage 6.1.5 real clients: previews, authoritative body contacts, head jump
     round = 2;
     room = await ok(room.hostId === a.user.id ? A : B, { type: 'NEXT' });
     assert.equal(room.match.phase, 'BUILD'); assert.equal(room.match.placements.length, 1);
-    for (const id of [a.user.id, b.user.id]) { const profile = await players.findById(id); assert.equal(profile?.progress.doners, 42); assert.equal(profile?.progress.goldenDoners, 3); }
+    for (const id of [a.user.id, b.user.id]) { const profile = await players.findById(id); assert.equal(profile?.progress.doners, await ledgerBalance(db,id)); assert.equal(profile?.progress.goldenDoners, 3); }
   });
 });
+
+test('Stage 6.2 real clients: typed traps, rotation, persisted loadout, hits/respawn and confirmed economy', { skip: !url && 'Requires isolated TEST_DATABASE_URL', timeout: 90000 }, async t => {
+  assert.ok(url); assert.match(new URL(url).pathname, /_test$/);
+  const db = createDatabase(url), players = createPlayerStore(db);
+  const cfg = { ...config, databaseUrl: url, botUsername: 'doner_test_bot' };
+  const app = await buildApp(cfg, players, false);
+  const { manager } = await attachMultiplayer(app, cfg, players, db, { buildMs: 30000, raceMs: 60000, reconnectGraceMs: 500, roomTtlMs: 120000 });
+  await app.listen({ host: '127.0.0.1', port: 0 });
+  const address = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  const ids: string[] = [], roomIds: string[] = [], clients: Client[] = [];
+  const latest = new Map<string, MovementSnapshot>(), previews = new Map<string, PreviewSnapshot>();
+  const driving = new Map<string, { socket: Client; sequence: number; direction: -1 | 0 | 1; jump: number }>(); let round = 1;
+  const timer = setInterval(() => {
+    for (const [id, c] of driving) {
+      const own = latest.get(id)?.players.find(p => p.playerId === id);
+      // The production predictor rebases on respawn; this fixture also follows server ack after a hit.
+      if (own?.life && own.life.phase !== 'ALIVE') { c.sequence = own.sequence; continue; }
+      const frames = Array.from({ length: 3 }, () => ({ sequence: ++c.sequence, direction: c.direction, jump: c.jump }));
+      if (c.socket.connected) c.socket.emit('race:input', { round, frames });
+    }
+  }, 50);
+  t.after(async () => { clearInterval(timer); clients.forEach(c => c.disconnect()); await app.close(); await db.room.deleteMany({ where: { id: { in: roomIds } } }); await db.user.deleteMany({ where: { id: { in: ids } } }); await db.$disconnect(); });
+  async function login(index: number) {
+    const result = await app.inject({ method: 'POST', url: '/auth/telegram', payload: { initData: signInitData({ user: JSON.stringify({ id: 5400000000000000 + Date.now() + index, first_name: `Trap fixture ${index}` }) }) } });
+    assert.equal(result.statusCode, 200); const profile = result.json(); ids.push(profile.user.id);
+    await db.playerProgress.update({ where: { userId: profile.user.id }, data: { doners: 42, goldenDoners: 3 } }); return profile;
+  }
+  async function connect(profile: Awaited<ReturnType<typeof login>>) {
+    const socket: Client = io(address, { auth: { token: profile.accessToken }, transports: ['websocket'], reconnection: false, forceNew: true }); clients.push(socket);
+    socket.on('race:snapshot', s => latest.set(profile.user.id, s)); socket.on('build:previews', s => previews.set(profile.user.id, s));
+    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('connect_error', reject); });
+    const previous = driving.get(profile.user.id);
+    driving.set(profile.user.id, { socket, sequence: previous?.sequence ?? 0, jump: previous?.jump ?? 0, direction: 0 }); return socket;
+  }
+  const a = await login(0), b = await login(1); const A = await connect(a); let B = await connect(b);
+  const request = (socket: Client, command: RoomCommand) => socket.timeout(3000).emitWithAck('room:command', command);
+  const ok = async (socket: Client, command: RoomCommand) => { const reply = await regressionCommand(socket, command); assert.equal(reply.ok, true, JSON.stringify(reply)); if (!reply.ok) throw new Error(); return reply.room!; };
+  let room = await ok(A, { type: 'CREATE', capacity: 2 }); roomIds.push(room.roomId); await ok(B, { type: 'JOIN', code: room.code });
+  await ok(A, { type: 'READY', ready: true }); await ok(B, { type: 'READY', ready: true }); room = await ok(A, { type: 'START' });
+  await t.test('type and rotation are validated; live previews preserve trusted owner and selected object', async () => {
+    A.emit('build:preview', { round: 1, sequence: 1, objectType: 'fan', orientation: 'up', position: { x: 224, y: 256 } });
+    await until(() => previews.get(b.user.id)?.previews[0]?.objectType === 'fan');
+    assert.equal(previews.get(b.user.id)!.previews[0]!.orientation, 'up');
+    A.emit('build:preview', { round: 1, sequence: 2, objectType: 'fan', orientation: 'left', position: { x: 224, y: 256 } });
+    await until(() => previews.get(b.user.id)?.previews[0]?.orientation === 'left');
+    for (const bad of [{ trapId: 'unknown' }, { trapId: 'fan', orientation: 'down' }]) {
+      const reply = await request(A, { type: 'PLACE', round: 1, commandId: randomUUID(), expectedRevision: room.revision, position: { x: 224, y: 256 }, ...bad } as never);
+      assert.equal(reply.ok, false); if (!reply.ok) assert.equal(reply.code, 'INVALID_REQUEST');
+    }
+    B.emit('build:preview', { round: 1, sequence: 1, objectType: 'arcade-crossbow', orientation: 'left', position: { x: 160, y: 256 } });
+    await until(() => previews.get(a.user.id)?.previews.some(p => p.objectType === 'arcade-crossbow' && p.orientation === 'left'));
+  });
+  await t.test('one trap per turn, idempotency includes type/rotation and persistent config survives store reload', async () => {
+    const place = { type: 'PLACE', round: 1, commandId: randomUUID(), expectedRevision: room.revision, position: { x: 224, y: 256 }, trapId: 'fan', orientation: 'up' } as const;
+    room = await ok(A, place); assert.equal((await ok(A, place)).match.placements.length, 1);
+    const changed = await request(A, { ...place, orientation: 'right' }); assert.equal(changed.ok, false);
+    const extra = await request(A, { ...place, commandId: randomUUID(), expectedRevision: room.revision, position: { x: 352, y: 240 } }); assert.equal(extra.ok, false);
+    room = await ok(B, { type: 'PLACE', round: 1, commandId: randomUUID(), expectedRevision: room.revision, position: { x: 160, y: 256 }, trapId: 'arcade-crossbow', orientation: 'left' });
+    assert.equal(room.match.phase, 'RACE');
+    const saved = await db.trapPlacement.findMany({ where: { roomId: room.roomId } });
+    assert.deepEqual(saved.map(p => [p.objectType, p.orientation]).sort(), [['arcade-crossbow', 'left'], ['fan', 'up']]);
+    const { roomStore } = await import('../src/multiplayer/store.ts');
+    const restored = (await roomStore(db).load()).find(r => r.roomId === room.roomId)!;
+    assert.deepEqual(restored.match.placements.map(p => [p.catalogId, p.orientation]).sort(), [['arcade-crossbow', 'left'], ['fan', 'up']]);
+    await until(() => previews.get(a.user.id)?.previews.length === 0);
+  });
+  await t.test('both clients see the same projectiles and server-confirmed hit, followed by a protected spawn', async () => {
+    await until(() => Boolean(latest.get(b.user.id)?.traps?.projectiles.length), 5000);
+    await until(() => latest.get(a.user.id)?.sequence === latest.get(b.user.id)?.sequence);
+    assert.deepEqual(latest.get(a.user.id)?.traps, latest.get(b.user.id)?.traps);
+    await until(() => latest.get(b.user.id)?.players.find(p => p.playerId === b.user.id)?.life?.phase === 'HIT', 6000);
+    const hit = latest.get(b.user.id)!.players.find(p => p.playerId === b.user.id)!.life!;
+    assert.equal(hit.failures, 1);
+    await until(() => latest.get(b.user.id)?.players.find(p => p.playerId === b.user.id)?.life?.phase === 'ALIVE', 3000);
+    const respawned = latest.get(b.user.id)!.players.find(p => p.playerId === b.user.id)!;
+    assert.equal(respawned.x, 64); assert.equal(respawned.life!.failures, 1); assert.ok(respawned.life!.immuneUntilTick > latest.get(b.user.id)!.tick);
+    await sleep(150); assert.equal(latest.get(b.user.id)!.players.find(p => p.playerId === b.user.id)!.life!.failures, 1);
+  });
+  await t.test('reconnect retains typed layout and active trap clock, finishes work after contacts/hazards', async () => {
+    B.disconnect(); B = await connect(b); room = await ok(B, { type: 'RESUME' }); assert.equal(room.match.placements.length, 2);
+    await until(() => Boolean(latest.get(b.user.id)?.traps));
+    const began = Date.now();
+    while (Date.now() - began < 30000 && manager.current(a.user.id)?.match.phase === 'RACE') {
+      for (const c of driving.values()) { c.direction = 1; c.jump++; }
+      await sleep(400);
+    }
+    room = await ok(A, { type: 'RESUME' }); assert.equal(room.match.phase, 'RESULTS', JSON.stringify(manager.movementSnapshot(a.user.id)));
+    assert.deepEqual(room.finishes.map(f => f.position).sort(), [1, 2]); assert.deepEqual(room.finishes, (await ok(B, { type: 'RESUME' })).finishes);
+    for (const c of driving.values()) c.direction = 0;
+  });
+  await t.test('NEXT adds a block without removing traps; a new match is empty; Doner matches ledger; ownership stays unchanged', async () => {
+    room = await ok(room.hostId === a.user.id ? A : B, { type: 'NEXT' }); round = 2;
+    assert.equal(room.match.placements.length, 2);
+    room = await ok(A, { type: 'PLACE', round, commandId: randomUUID(), expectedRevision: room.revision, position: { x: 352, y: 240 }, trapId: 'basic-platform', orientation: 'none' });
+    room = await ok(B, { type: 'SKIP', round }); assert.equal(room.match.placements.length, 3);
+    for (const id of ids) { const p = (await players.findById(id))!.progress; assert.equal(p.doners, await ledgerBalance(db,id)); assert.equal(p.goldenDoners, 3); assert.deepEqual(p.unlockedCharacterIds, ['altoha']); }
+    await ok(room.hostId === a.user.id ? A : B, { type: 'CLOSE' });
+    room = await ok(A, { type: 'CREATE', capacity: 2 }); roomIds.push(room.roomId); assert.deepEqual(room.match.placements, []);
+  });
+});
+
+// Register in this file: RoomManager integration suites must share one sequential lifecycle.
+import { economyIntegration } from './economy.integration.ts';
+economyIntegration(url);

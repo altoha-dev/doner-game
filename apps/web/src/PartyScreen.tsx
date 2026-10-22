@@ -7,18 +7,18 @@ import { createRoomConnection } from './multiplayer/connection';
 import { getTelegramWebApp } from './telegram';
 import './party.css';
 
-export function PartyScreen({ credentials, userId, initialCode, entry, onExit, onReauthenticate, backRequest, reducedMotion }: {
+export function PartyScreen({ credentials, userId, initialCode, entry, onExit, onReauthenticate, backRequest, reducedMotion, onBalance }: {
   credentials: { url: string; token: string }; userId: string; initialCode: string; entry: 'create' | 'join' | 'menu';
-  onExit(): void; onReauthenticate(): void; backRequest: RefObject<(() => void) | null>; reducedMotion: boolean;
+  onBalance(balance: number): void; onExit(): void; onReauthenticate(): void; backRequest: RefObject<(() => void) | null>; reducedMotion: boolean;
 }) {
   const [connection, setConnection] = useState<ReturnType<typeof createRoomConnection> | null>(null);
   useEffect(() => {
     const next = createRoomConnection(credentials.url, credentials.token, userId); setConnection(next); next.connect();
     return () => { next.destroy(); };
   }, [credentials.url, credentials.token, userId]);
-  return connection ? <ConnectedParty connection={connection} userId={userId} initialCode={initialCode} entry={entry} onExit={onExit} onReauthenticate={onReauthenticate} backRequest={backRequest} reducedMotion={reducedMotion} /> : <p role="status">ПОДКЛЮЧЕНИЕ…</p>;
+  return connection ? <ConnectedParty connection={connection} userId={userId} initialCode={initialCode} entry={entry} onExit={onExit} onReauthenticate={onReauthenticate} backRequest={backRequest} reducedMotion={reducedMotion} onBalance={onBalance} /> : <p role="status">ПОДКЛЮЧЕНИЕ…</p>;
 }
-function ConnectedParty({ connection, userId, initialCode, entry, onExit, onReauthenticate, backRequest, reducedMotion }: Omit<Parameters<typeof PartyScreen>[0], 'credentials'> & { connection: ReturnType<typeof createRoomConnection> }) {
+function ConnectedParty({ connection, userId, initialCode, entry, onExit, onReauthenticate, backRequest, reducedMotion, onBalance }: Omit<Parameters<typeof PartyScreen>[0], 'credentials'> & { connection: ReturnType<typeof createRoomConnection> }) {
   const view = useSyncExternalStore(connection.subscribe, connection.getSnapshot);
   const [mode, setMode] = useState(entry);
   const [capacity, setCapacity] = useState(4);
@@ -27,6 +27,8 @@ function ConnectedParty({ connection, userId, initialCode, entry, onExit, onReau
   const [copied, setCopied] = useState('');
   const [now, setNow] = useState(Date.now());
   const room = view.room, me = room?.players.find(p => p.playerId === userId);
+  const balance = room?.balances?.[userId];
+  useEffect(() => { if (balance !== undefined) onBalance(balance); }, [balance, onBalance]);
   const busy = view.pending || view.status !== 'connected';
   const requestExit = () => { if (room && room.match.phase !== 'MATCH_FINISHED') setExitPrompt(true); else onExit(); };
   useEffect(() => { backRequest.current = requestExit; return () => { backRequest.current = null; }; });
@@ -56,7 +58,7 @@ function ConnectedParty({ connection, userId, initialCode, entry, onExit, onReau
       {!room ? <div className="room-entry pixel-panel">
         <div className="room-tabs"><button aria-pressed={mode === 'create'} onClick={() => setMode('create')}>СОЗДАТЬ</button><button aria-pressed={mode === 'join'} onClick={() => setMode('join')}>ВОЙТИ ПО КОДУ</button></div>
         {mode === 'create' ? <><label className="room-field">СКОЛЬКО МЕСТ?<select aria-label="Количество мест" value={capacity} onChange={e => setCapacity(Number(e.target.value))}>{[2, 3, 4].map(n => <option key={n} value={n}>{n} ИГРОКА</option>)}</select></label><button className="pixel-button" disabled={busy} onClick={() => void connection.request({ type: 'CREATE', capacity })}>СОЗДАТЬ КОМНАТУ · {capacity}</button></> : <><p className="hint">{initialCode ? 'Вас пригласили. Подтвердите вход в комнату.' : 'Попроси друга прислать шестизначный код.'}</p><label className="room-field">КОД КОМНАТЫ<input aria-label="Код комнаты" autoCapitalize="characters" autoComplete="off" maxLength={6} value={code} onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g, ''))} placeholder="X7K2M9" /></label><button className="pixel-button" disabled={busy || !/^[A-Z2-9]{6}$/.test(code)} onClick={() => void connection.request({ type: 'JOIN', code })}>ПРИСОЕДИНИТЬСЯ</button></>}
-        <p className="hint">2–4 друга · общая карта · без списаний Doner</p>
+        <p className="hint">2–4 друга · общая карта · магазин ловушек</p>
       </div> : <>
         <div className="room-code pixel-panel"><span className="eyebrow">КОМНАТА</span><strong data-testid="room-code">{room.code}</strong><span>{room.players.filter(p => !p.left).length}/{room.capacity} ИГРОКА</span></div>
         <div className="invite-actions"><button onClick={() => void copy(room.code)}>КОПИРОВАТЬ КОД</button><button disabled={!room.inviteLink} onClick={() => room.inviteLink && void copy(room.inviteLink)}>КОПИРОВАТЬ ССЫЛКУ</button><button className="button-secondary" disabled={!room.inviteLink} onClick={() => void invite()}>ПРИГЛАСИТЬ ДРУГА ↗</button></div>

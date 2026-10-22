@@ -23,6 +23,7 @@ model User {
   progress           PlayerProgress?
   unlockedCharacters UnlockedCharacter[]
   roomPlayers        RoomPlayer[]
+  donerTransactions DonerTransaction[]
 }
 
 model PlayerProgress {
@@ -66,6 +67,7 @@ model Room {
   rounds          MatchRound[]
   placements      TrapPlacement[]
   finishes        RoundFinish[]
+  transactions    DonerTransaction[]
   @@index([expiresAt])
 }
 model RoomPlayer {
@@ -78,6 +80,7 @@ model RoomPlayer {
   left              Boolean  @default(false)
   buildDone         Boolean  @default(false)
   seat              Int
+  score             Int      @default(0)
   joinedAt          DateTime @default(now()) @db.Timestamptz(3)
   room              Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -89,6 +92,10 @@ model MatchRound {
   phase       String
   startedAt   DateTime  @default(now()) @db.Timestamptz(3)
   endedAt     DateTime? @db.Timestamptz(3)
+  settlement  String    @default("LEGACY")
+  participantIds String[] @default([]) @db.Uuid
+  playedIds      String[] @default([]) @db.Uuid
+  settledAt   DateTime? @db.Timestamptz(3)
   room        Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
   @@id([roomId, roundNumber])
 }
@@ -98,10 +105,13 @@ model TrapPlacement {
   roundNumber Int
   userId      String   @db.Uuid
   objectType  String
+  orientation String   @default("none")
+  slot        Int      @default(1)
+  cost        Int      @default(0)
   gridX       Int
   gridY       Int
   room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  @@unique([roomId, roundNumber, userId])
+  @@unique([roomId, roundNumber, userId, slot])
 }
 model RoundFinish {
   roomId          String    @db.Uuid
@@ -111,7 +121,26 @@ model RoundFinish {
   finishPosition  Int?
   finishTimestamp DateTime? @db.Timestamptz(3)
   finishDuration  Int?
+  points          Int       @default(0)
+  doners          Int       @default(0)
   room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
   @@id([roomId, roundNumber, userId])
   @@unique([roomId, roundNumber, finishPosition])
+}
+
+// Immutable journal; existing balances are preserved, not reconstructed from this new ledger.
+model DonerTransaction {
+  id              String   @id @default(uuid()) @db.Uuid
+  key             String   @unique
+  userId          String   @db.Uuid
+  amount          Int
+  transactionType String
+  roomId          String?  @db.Uuid
+  roundNumber     Int
+  placementId     String?  @unique
+  balanceAfter    Int
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room            Room?    @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  @@index([userId, createdAt])
 }

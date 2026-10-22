@@ -1,4 +1,4 @@
-import { getCharacter, PLAYER_PHYSICS } from '@doner-game/shared';
+import { getCharacter, getTrap, trapOrientation, PLAYER_PHYSICS } from '@doner-game/shared';
 import type { BuildPreviewInput, Movement, RaceControls, RaceInputBatch, RoomCommand } from '@doner-game/shared';
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const keys = (v: Record<string, unknown>, allowed: string[]) => Object.keys(v).every(k => allowed.includes(k));
@@ -11,7 +11,7 @@ export function parseCommand(value: unknown): RoomCommand | null {
     case 'JOIN': valid = keys(v, ['type', 'code']) && typeof v.code === 'string' && /^[A-Z2-9]{6}$/i.test(v.code); break;
     case 'READY': valid = keys(v, ['type', 'ready']) && typeof v.ready === 'boolean'; break;
     case 'CHARACTER': valid = keys(v, ['type', 'characterId']) && typeof v.characterId === 'string' && Boolean(getCharacter(v.characterId)); break;
-    case 'PLACE': valid = keys(v, ['type', 'round', 'commandId', 'expectedRevision', 'position']) && integer(v.round) && integer(v.expectedRevision) && typeof v.commandId === 'string' && /^[a-zA-Z0-9-]{16,64}$/.test(v.commandId) && record(v.position) && keys(v.position, ['x', 'y']) && typeof v.position.x === 'number' && Number.isFinite(v.position.x) && typeof v.position.y === 'number' && Number.isFinite(v.position.y); break;
+    case 'PLACE': valid = keys(v, ['type', 'round', 'commandId', 'expectedRevision', 'position', 'trapId', 'orientation']) && Boolean(getTrap(v.trapId ?? 'basic-platform')) && Boolean(trapOrientation(v.trapId ?? 'basic-platform', v.orientation)) && integer(v.round) && integer(v.expectedRevision) && typeof v.commandId === 'string' && /^[a-zA-Z0-9-]{16,64}$/.test(v.commandId) && record(v.position) && keys(v.position, ['x', 'y']) && typeof v.position.x === 'number' && Number.isFinite(v.position.x) && typeof v.position.y === 'number' && Number.isFinite(v.position.y); break;
     case 'SKIP': valid = keys(v, ['type', 'round']) && integer(v.round); break;
     case 'RESUME': case 'LEAVE': case 'START': case 'NEXT': case 'CLOSE': valid = keys(v, ['type']); break;
   }
@@ -38,7 +38,7 @@ export function parseRaceInput(value: unknown): RaceInputBatch | null {
   return value as unknown as RaceInputBatch;
 }
 export function parsePreview(value: unknown): BuildPreviewInput | null {
-  if (!record(value) || !keys(value, ['round', 'sequence', 'objectType', 'position']) || !integer(value.round) || !integer(value.sequence) || value.objectType !== 'basic-platform') return null;
+  if (!record(value) || !keys(value, ['round', 'sequence', 'objectType', 'position', 'orientation']) || !integer(value.round) || !integer(value.sequence) || !trapOrientation(value.objectType, value.orientation)) return null;
   const position = value.position;
   if (position !== null && (!record(position) || !keys(position, ['x', 'y']) || !['x', 'y'].every(k => typeof position[k] === 'number' && Number.isFinite(position[k]) && Math.abs(position[k]) <= 4096))) return null;
   return value as unknown as BuildPreviewInput;
