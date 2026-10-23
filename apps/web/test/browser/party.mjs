@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 const base = process.env.BROWSER_TEST_URL ?? 'http://127.0.0.1:5186';
 const production = process.env.BROWSER_TEST_PRODUCTION === '1';
-const shots = fileURLToPath(new URL(`../../../../artifacts/stage-6.1/${production ? 'production/' : ''}`, import.meta.url));
+const shots = process.env.BROWSER_SCREENSHOT_DIR ?? fileURLToPath(new URL(`../../../../artifacts/stage-6.1/${production ? 'production/' : ''}`, import.meta.url));
 await mkdir(shots, { recursive: true });
 const backend = fork('test/browser-server.ts', { cwd: fileURLToPath(new URL('../../../api/', import.meta.url)), execArgv: ['--import', 'tsx'], stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
 backend.stderr.on('data', data => process.stderr.write(data));

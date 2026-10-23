@@ -1,4 +1,4 @@
-# DONER GAME — v0.6.3 Doner Economy & Trap Shop
+# DONER GAME — v0.6.3.5 Winter Pixel Art
 
 Telegram Mini App + Bot. Зимний party platformer для 2–4 друзей: LOBBY → BUILD → RACE → RESULTS → NEXT. В BUILD доступны PLATFORM BLOCK, FAN и ARCADE CROSSBOW: общая карта, live previews с направлением, серверные силы воздуха, снаряды и быстрый respawn. Четыре персонажа, контакты и smoothing Stage 6.1.6 сохранены.
 
@@ -6,7 +6,9 @@ Telegram Mini App + Bot. Зимний party platformer для 2–4 друзей
 
 [Отчёт Stage 6.3 и deployment](docs/STAGE_6_3_REPORT.md) · [Progress](docs/STAGE_6_3_PROGRESS.md) · [Deployment contract](docs/TELEGRAM_MULTIPLAYER_TEST_PLAN.md) · [Физика Stage 6.1.6](docs/STAGE_6_1_6_REPORT.md).
 
-UI: `v0.6.3 Doner Economy & Trap Shop`; root SemVer: `0.6.3`.
+[Visual polish Stage 6.3.5](docs/STAGE_6_3_5_REPORT.md) · [Progress](docs/STAGE_6_3_5_PROGRESS.md) · [Art direction](docs/ART_DIRECTION.md).
+
+UI: `v0.6.3.5 Winter Pixel Art`; root SemVer: `0.6.3-5`. Зимний городок, локальный Pixelify Sans с кириллицей, общие рисунки ловушек для магазина/preview/арены. Механика и схема БД остаются Stage 6.3.
 
 ## Попробовать
 
@@ -129,7 +131,7 @@ Rate limit хранится в памяти одного процесса, бе�
 
 ## Существующий hosting contract
 
-Production configuration и variables не менялись. Deploy/push/reset/production migrations не выполнялись; новые orientation/economy migrations проверены только на изолированной локальной тестовой БД. Перед запуском нового API нужен `pnpm db:deploy` в целевом окружении при отдельно разрешённом deployment.
+Аудит2026-10-23: GitHub main=`af126c7` содержит Stage6.1.6–6.3; Vercel зарегистрировал успешный Production deployment6.3. Railway API6.3 и production schema не подтверждены: последняя доступная Railway deployment-запись относится кb51c9e9. Не путать эти сведения с локальным production preview. Источники и точные границы проверки — в [финальном отчёте](docs/STAGE_6_3_REPORT.md). В текущей сессии push/deploy/reset/production migrations не выполнялись; runtime env не менялись. На изолированной upgrade-test БД все5 migrations применены и старые данные сохранены. Перед запуском нового API отдельно проверить target migration status и при необходимости выполнить `pnpm db:deploy` в разрешённом окружении.
 
 | Сервис | Сохранённые параметры |
 | --- | --- |

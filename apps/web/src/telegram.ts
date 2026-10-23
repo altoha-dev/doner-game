@@ -91,8 +91,8 @@ export function initializeTelegram(webApp: TelegramWebApp | undefined): (() => v
       .find((color) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color));
     document.documentElement.style.setProperty('--telegram-accent', accent ?? '#ffa64d');
 
-    if (webApp.isVersionAtLeast('6.1')) webApp.setBackgroundColor('#101e38');
-    if (webApp.isVersionAtLeast('6.9')) webApp.setHeaderColor('#101e38');
+    if (webApp.isVersionAtLeast('6.1')) webApp.setBackgroundColor('#101f32');
+    if (webApp.isVersionAtLeast('6.9')) webApp.setHeaderColor('#101f32');
   };
 
   applyTheme();

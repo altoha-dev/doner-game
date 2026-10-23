@@ -5,19 +5,19 @@
 .game-toolbar .back-button { padding-left: 0; }
 .game-pause { min-width: 64px; }
 .phase-hud { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin: 8px 0; }
-.phase-hud h1 { font: 900 27px/1.2 var(--font-mono); color: var(--accent-light); }
+.phase-hud h1 { font: 700 30px/1.1 var(--font-display); color: var(--accent-light); text-shadow: 2px 2px #101f32; }
 .phase-hud h1 small { color: #9eb7cd; font-size: 18px; }
 .phase-hud .eyebrow { font-size: 8px; }
 .arena-character { display: flex; gap: 8px; align-items: center; font: 11px var(--font-mono); }
 .arena-character .character-portrait { width: 32px; height: 32px; }
 .round-strip { display: flex; justify-content: space-between; font: 8px/1.5 var(--font-mono); color: var(--text-muted); margin: 12px 0 6px; }
 .round-strip b { color: var(--accent-light); }
-.game-viewport { position: relative; border: 2px solid #68859c; box-shadow: 0 4px #091326; background: #101e38; overflow: hidden; }
+.game-viewport { position: relative; border: 2px solid #769bad; border-top-color: #d9eae4; box-shadow: 0 4px #091626, 0 0 0 1px #091626; background: #172e48; overflow: hidden; }
 .phaser-host { width: 100%; height: clamp(224px, 40svh, 340px); position: relative; touch-action: none; }
 .phaser-host canvas { display: block; image-rendering: pixelated; }
 .game-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 16px; align-items: center; justify-content: center; padding: 20px; background: #101e38ed; text-align: center; font: 14px/1.5 var(--font-mono); }
-.results { background: #101e38e3; }
-.results h2 { color: var(--accent-light); font: 900 30px var(--font-mono); }
+.results { background: #13283ce8; box-shadow: inset 0 4px #f4b46a, inset 0 -4px #43647a; }
+.results h2 { color: var(--accent-light); font: 700 clamp(25px, 7vw, 34px)/1.05 var(--font-display); text-shadow: 2px 3px #0b1a2a; }
 .results > b { font-size: 24px; }
 .results p { color: var(--text-muted); font: 12px/1.6 var(--font-body); }
 .build-ui { margin-top: 12px; }
@@ -46,11 +46,10 @@
 @media (max-height: 650px) { .phaser-host { height: 224px; } .phase-hud { margin: 4px 0; } .round-strip { margin-top: 6px; } .game-controls { margin-top: 10px; } .game-control { min-height: 56px; } .game-keyboard-hint { display: none; } }
 .network-debug { position: absolute; top: 4px; right: 4px; z-index: 20; margin: 0; padding: 5px; background: #101e38e8; color: #c5e7dd; font: 9px/1.4 monospace; pointer-events: none; white-space: pre-wrap; max-width: calc(100% - 8px); }
 .trap-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-.trap-picker .block-picker { display: flex; flex-direction: column; align-items: center; min-height: 72px; padding: 6px 2px; font: 9px var(--font-mono); word-break: normal; }
-.trap-picker button[aria-pressed=true] { border-color: #ffb66d; background: #36516a; }
+.trap-picker .block-picker { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 112px; padding: 10px 3px; font: 600 13px/1.1 var(--font-display); word-break: normal; border-top-color: #8dabb7; box-shadow: inset 0 -3px #132a3d, 0 3px #0b1c2c; }
+.trap-picker button[aria-pressed=true] { border-color: #f4b46a; background: #3c5665; box-shadow: inset 0 2px #ffdda1, inset 0 -3px #786351, 0 3px #0b1c2c; }
 .trap-picker small { font-size: 8px; }
-.trap-swatch { font-size: 24px; line-height: 28px; color: #c6a180; }
-.trap-swatch--air { color: #9ddfe9; }.trap-swatch--projectile { color: #ffbf8b; }
+.trap-art { display: block; width: 64px; height: 32px; flex: 0 0 auto; image-rendering: pixelated; filter: drop-shadow(0 2px #101f32); }
 .test-loadout, .trap-description { font: 10px/1.5 var(--font-mono); color: #bed7db; margin: 4px 0; }
 .trap-rotate { min-height: 44px; width: 100%; font-size: 11px; }
 
@@ -60,3 +59,29 @@
 .shop-balance { font: 12px var(--font-mono); color: #ffbf8b; }
 .trap-picker small { white-space: normal; line-height: 1.4; }
 .finish-list li { flex-wrap: wrap; gap: 5px; }
+
+.game-toolbar { color: var(--text-muted); }
+.game-toolbar button { font: 600 13px var(--font-display); }
+.phase-hud { padding: 8px 0; border-bottom: 1px solid #45687e; }
+.round-strip { padding: 5px 0; gap: 8px; }
+.arena-character { font: 600 14px var(--font-display); }
+.test-loadout { border: 1px solid #597585; border-top: 2px solid #abc8cb; background: #223e51; padding: 10px; margin: 6px 0 10px; font-family: var(--font-body); font-size: 11px; }
+.test-loadout b { color: var(--accent-light); font: 600 16px var(--font-display); }
+.shop-balance { display: inline-block; padding: 6px 9px; border: 1px solid #927a5d; background: #302e32; color: var(--accent-light); font: 600 15px var(--font-display); }
+.trap-picker small { font: 10px/1.3 var(--font-body); margin: 0; color: var(--text-muted); }
+.trap-picker small:first-of-type { color: var(--accent-light); font: 600 13px var(--font-display); }
+.trap-picker button:disabled small { color: #b7c6ca; }
+.trap-description { font: 12px/1.5 var(--font-body); margin: 10px 0; }
+.trap-rotate { font: 600 14px var(--font-display); border-top-color: #9db9bf; }
+.build-nudges button { box-shadow: inset 0 2px #607e90, 0 2px #0b1c2c; }
+.build-nudges button:last-child { font: 600 12px var(--font-display); }
+.game-control { background: #2d4b61; box-shadow: inset 0 2px #a5c4cb, inset 0 -4px #183044, 0 4px #091626; }
+.game-control small { font: 600 13px var(--font-display); }
+.game-control--jump { background: var(--accent); box-shadow: inset 0 2px #ffe5ac, inset 0 -4px #a66b45, 0 4px #091626; }
+.game-control:active { box-shadow: inset 0 3px #132b3e; }
+.match-scoreboard { padding: 14px; }
+.match-scoreboard > b { display: block; margin-bottom: 10px; color: var(--accent-light); font: 600 18px var(--font-display); }
+.match-scoreboard > div { align-items: center; padding: 8px 0; border-top: 1px solid #416075; }
+.match-scoreboard > div span { min-width: 0; overflow-wrap: anywhere; }
+.match-scoreboard > div strong { min-width: 28px; padding: 2px 5px; background: #142c40; color: #e3f1e7; text-align: center; font: 600 19px var(--font-display); }
+.match-scoreboard p { border-top: 1px solid #947a5e; padding-top: 10px; font: 600 18px/1.3 var(--font-display); overflow-wrap: anywhere; }

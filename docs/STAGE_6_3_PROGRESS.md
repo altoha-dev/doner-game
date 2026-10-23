@@ -1,81 +1,52 @@
-# Stage 6.3 — Doner Economy & Trap Shop
+# Stage 6.3 — финальный статус,2026-10-23
 
-## DONE — аудит 2026-10-22
+**DONE. READY для дальнейшей локальной разработки Stage6.4.** Stage6.4 не начат. Production end-to-end готовность отдельно не подтверждена — см. ниже и STAGE_6_3_REPORT.md.
 
-- Задание a8d4d9b1-5f58-4216-8bb9-9c24dcfa8908 прочитано. Текущая ветка/репозиторий сохраняются, существующие незакоммиченные Stage6.2 изменения не откатываются. Commit/push/deploy/reset запрещены.
-- Изучены schema/PlayerProgress, catalog, manager/store/BUILD/results, docs design/architecture/6.2 report/progress. Существующие4 migrations сохраняются; новая будет после trap_orientation.
-- Physics60Hz/prediction/contacts/hazards не требуют переписывания. Экономика работает вне tick.
+## DONE — реализация и проверки
 
-## Решения
+- Сохранены реализованные ledger, атомарные покупки, idempotent purchase/settlement, два слота с EXTRA, награды3/2/1/0points и0/1/2/3Doner, cumulative score,5 раундов и общая победа при равенстве. Training бесплатен/NO REWARDS. Все4 героя и physics/hazards сохранены.
+- `pnpm test`:145 PASS (API101/web29/bot15), fail0, skipped0. Включены8 economy integration scenarios: concurrency, lost ACK/restart, rollback после debit/failed placement, rollback reward и retry PENDING. Golden/progress сохранены.
+- `pnpm typecheck`, `pnpm build`: PASS. Последняя сборка, запущенная перед лимитом, завершилась успешно; лог подтверждает Done API/web/bot/shared. Сохраняется предупреждение lazy Phaser chunk>500kB.
+- Economy browser DEV и production preview: PASS полного5-round матча2 клиентов;3 purchase rows,5 duplicate deliveries,8 reward rows,11 unique ledger keys; final score10:10, Doner2/1, Golden7/7. Пятый раунд DNF0, общая победа.
+- Training DEV37/production34 PASS. Multiplayer DEV20/production21 PASS. Interactions13 PASS (4 клиента/героя,120ms B, live previews, push/head/native multitouch, BUILD/RACE reconnect, NEXT).
+- Network browser5 profiles PASS: RTT40/80/150ms,jitter,stall-loss. Stable head height21px; push max rendered step1.92px; support-jump max27.12px включает движение+коррекцию.
+- Trap browser DEV40/80/150ms и production80ms PASS. Training traps DEV/production PASS, без account HTTP.
+- Physics benchmark50 и FAN/CROSSBOW benchmark15 PASS. При финализации JSON повторно сравнены со Stage6.2: все results совпадают точно.
+- Mobile320/375/390/430/500: нет overflow, targets≥44px; screenshots просмотрены.
+- При возобновлении код уже committed и рабочее дерево чистое. Runtime TODO/FIXME/незавершённых заглушек не найдено. Код не менялся, тяжёлые browser checks заново не запускались. Проверены сохранённые логи; новый `git diff --check` PASS.
 
-- Один existing PlayerProgress.doners; GoldenDoner не меняется. Ledger unique key для reward(room,round,user) и purchase(placement); balance delta/ledger/placement атомарны.
-- Central rules: points3/2/1/0, Doner0/1/2/3; DNF/ABORTED/не игравшие0. Минимум2 разных authenticated участников с игровым input; Training не вызывает economy.
-- Первый slot: бесплатный block либо FAN2/CROSSBOW3. После block доступен ровно один extra block1 или завершение хода (SKIP). FAN/CROSSBOW завершают BUILD сразу. Оплата только successful placement, не preview.
-- Сохраняем5 раундов; total points в RoomPlayer, одинаковые totals делят победу. PENDING settlement хранится в БД, retry на сервере, NEXT только после SETTLED. Старые раунды LEGACY не награждаются задним числом.
+## DONE — оставшаяся SQL-проверка
 
-## DONE — восстановление и критические проверки
+- Изолированный cluster сохранился:127.0.0.1:55436, DB `doner_stage63_upgrade_test`.
+- Выполнено `BEGIN READ ONLY`/SELECT черезpsql, без reset/migrate/data writes.
+- Legacy User UUIDaa000000-0000-4000-8000-000000000001 и TelegramID6000000000000001 сохранены. PlayerProgress: Doner17/Golden9/campaign4/selected=temik — как до upgrade.
+- Legacy placement сохранён: orientation=none,slot1,cost0. Round=LEGACY,ledger0 — без ретроактивных начислений.
+- Все5 migrations finished,rollback отсутствует, порядок init → selected_character → party_rooms → trap_orientation → doner_economy. На проверенной test DB pending migrations нет.
+- Production DATABASE_URL не использовался; production migration status неизвестен. Новых runtime env нет.
 
-- Shared `economy.ts`, additive schema/migration `20261022000000_doner_economy`, purchase/settlement/store/manager, shop/results/scoreboard/profile balance реализованы. Согласованные правила двух слотов, пяти раундов и общей победы сохранены.
-- Новая локальная `doner_stage63_test` на 127.0.0.1:55436: все пять миграций применены. Production env не читался/не использовался.
-- `migration-upgrade.mjs`: PASS на отдельной `doner_stage63_upgrade_test`: три старые миграции → существующий User/PlayerProgress/placement → orientation + economy. Doner17, Golden9, campaign4 и выбор персонажа сохранены; старый раунд LEGACY, ledger пуст. Log `/private/tmp/doner-stage63-upgrade.log`.
-- Новые 7 Socket.IO/PG economy scenarios PASS: бесплатный/extra/paid slot; invalid/preview/cancel; дубликаты; конкурентный debit; rank rewards; повторный settlement; lost ACK/restart; искусственный сбой SQL reward с полным rollback и восстановлением PENDING. Golden/progress сохранены.
-- Typecheck PASS до последних малых правок; общий повторный запуск ещё выполняется. Предыдущий полный запуск FAIL: старые сценарии считали первый бесплатный блок концом BUILD. Сценарии теперь явно отказываются от EXTRA через SKIP; тесты не удалены.
-- Исправлен retry pending-settlement: закрытая комната не удаляется во время backoff. ARIA-цена недоступной платной ловушки больше не говорит «бесплатно».
+## DONE — GitHub / публикации
 
-## PARTIAL
+- Local main=origin/main=`af126c74a2ba502530b47db2f8874a3685903cdc`.
+- `git ls-remote origin refs/heads/main` подтвердил тот же SHA непосредственно на GitHub.
+- Stage6.1.6 commit9448612 — предок main. Stage6.2+6.3 вместе вошли вaf126c7; отдельного6.2 commit нет.
+- Vercel GitHub deployment7257499810: Production,af126c7,success2026-10-22T16:19:34Z. Это уже состоявшаяся публикация, не localhost preview и не действие этой сессии.
+- Последняя доступная Railway запись7217390126: b51c9e9,success2026-10-21T04:06:03Z. API6.1.6–6.3 и production schema не подтверждены; отсутствие записи не исключает ручной deployment.
+- Финализация меняет только README.md,STAGE_6_3_PROGRESS.md,STAGE_6_3_REPORT.md. Эти документационные изменения не committed/pushed. Новых branches/commits/push/deploy не выполнялось.
 
-- Frontend реализован; browser regression scripts адаптированы к явному завершению BUILD и подтверждённым балансам. Browser Stage6.3 ещё НЕ запускался.
-- Full tests повторяются после исправления legacy helpers; итог не подтверждён.
+## Ограничения / отдельные последующие действия
 
-## TODO
+- Сохраняется одиночная коррекция rider при неожиданном прыжке опоры (исторически16–26px приRTT80–150ms); физика не переписывалась ради её скрытия.
+- Один API instance, нет distributed ownership/расширенного anti-farm; сговор друзей возможен. Геометрический guard не доказывает проходимость всех комбинаций hazards.
+- Перед public smoke отдельно подтвердить Railway deployed SHA и target migration status; при необходимости согласованно обновить API/web/schema по инструкции REPORT. Никаких production операций автоматически.
+- Два настоящих телефона ещё требуют проверки: auth/room/invite, prices/purchases/rewards, reconnect/фон/BackButton/multi-touch,5 rounds/results, Golden preservation и Training.
+- Stage6.4: сначала согласовать scope/критерии, затем небольшие изменения с сохранением regression экономики/физики. Не начинать без нового задания.
 
-1. Проверить `/private/tmp/doner-stage63-test.log`; точечно исправить реальные ошибки.
-2. Новый browser economy QA: два клиента, FAN/CROSSBOW/EXTRA, недостаточный баланс, повтор, reconnect, rewards, пять раундов. Training и сохранённые regression suites DEV/production preview.
-3. Финальные typecheck/build/test/diffcheck; README/design/architecture/REPORT; остановить свои QA процессы.
+## Evidence и история ошибок
 
-Следующее действие: дождаться общего test run, запустить локальный Vite5186 и создать economy browser scenario. Нельзя параллельно запускать RoomManager fixtures на одной БД (recovery завершает активные RACE).
+`artifacts/stage-6.3/logs/`, `development/economy-browser.json`, `production/economy-browser.json`, `network-regression.json`, `trap-network.json`, `browser-network.json`, `traps-development.json`, `traps-production.json`, `final-audit.json`. Artifacts gitignored; итоговые сведения сохранены в versioned REPORT.
 
-## Checkpoint — core PASS, browser QA выполняется
+Исторические FAIL не считаются PASS: старые однослотовые tests адаптированы к явному SKIP после бесплатного блока; y160 в browser fixture исправлен на176; порядок финишей сделан последовательным native input; trap reconnect barrier теперь ждёт новый snapshot и ready effects. Параллельный Prisma generate далEEXIST — проверки повторены последовательно. Последняя дополнительная SQL-проверка была остановлена лимитом автоматического approval review; новая READ ONLY проверка2026-10-23 завершена успешно. Никаких незавершённых тестов в таблице PASS нет.
 
-- DONE: `pnpm test`144/144 (API100/web29/bot15), skipped0; log `/private/tmp/doner-stage63-test.log`. Новый дополнительный integration test SQL failure AFTER debit добавлен после этого run и пока TODO rerun (итог ожидается145).
-- DONE: typecheck PASS; build PASS после последовательного запуска. Первоначальный параллельный запуск двух Prisma generators дал EEXIST; это не PASS и был повторён последовательно.
-- DONE: Training DEV37/production34; real multiplayer regression DEV20. Logs `/private/tmp/doner-stage63-{training-dev,training-prod,party-dev}.log`.
-- DONE: маленькая UI fix — чужое placement не очищает мой preview; собственное первое placement очищает ghost и открывает EXTRA. README/design/architecture описывают текущую экономику.
-- PARTIAL: новый economy browser test. Первая попытка использовала запрещённый y160; исправлена на176. Вторая завершила4 раунда, но заданный по таймеру порядок финишей отличался от ожидания; теперь участники проходят по очереди с native input, race fixture40s. Эти попытки не объявлены PASS. Новый run выполняется, лог `doner-stage63-economy-dev.log`.
-- Следующее действие: завершить economy DEV; заново build после preview fix; economy/party/traps production preview, interactions/network/traps DEV, Training traps DEV/prod, оба physics benches; финальные145 tests/typecheck/build/diffcheck и REPORT. На одной DB только один multiplayer fixture одновременно.
+Локальные QA Vite5186/preview4186 и собственный PostgreSQL cluster остановлены после проверки. Каталог `/private/tmp/doner-stage6-test-pg` и обе тестовые БД сохранены; очистки данных не было.
 
-## Checkpoint — economy DEV DONE
-
-- Economy browser DEV PASS: полный5-round матч двух Chromium клиентов,3 paid placements,5 duplicate command deliveries,8 unique reward ledger rows, score10:10/shared victory, final idle DNF0; Doner total3, Golden7 у обоих. Mobile320/375/390/430/500 без overflow, touch targets≥44. JSON/screenshots `artifacts/stage-6.3/development/`.
-- Training traps DEV PASS: fan/bow/hit/respawn/finish,3 persistent types, no account HTTP.
-- Создан REPORT с описанием транзакций/миграций/deployment/manual smoke; финальная verification section пока PARTIAL.
-- Следующее действие: sequential verification runner: interactionsDEV → typecheck → build → full145tests → economy/party production → networkDEV → trapsDEV/prod → Training trapsprod → benches. При первом FAIL runner останавливается; читать точный log, исправлять причину и продолжать с этого шага.
-
-## Checkpoint — core final145 PASS
-
-- DONE: interactions DEV13, including4 clients, Ayazhan, live previews,120ms B, push/head/multitouch, BUILD/RACE reconnect, NEXT и подтверждённый Home balance.
-- DONE: последовательно typecheck/build и full `pnpm test`:145 (API101/web29/bot15), skipped0. Добавленный SQL failure-after-debit тест PASS: wallet/ledger/room revision/slot полностью rollback.
-- Исправлены две устаревшие подсказки Lobby/How («без списаний»/«Doner не меняются»); web заново собран с typecheck после правки, до production QA.
-- PARTIAL: economy production сейчас выполняется. Остальной sequential runner ещё TODO. Script `/private/tmp/doner-stage63-verify.py`, живой exec session39314 (если сохранился). Logs `/private/tmp/doner-stage63-*.log`.
-
-## Checkpoint — economy production DONE
-
-- Economy production preview PASS: все5 раундов/3 покупки/5 duplicates/8 rewards/shared victory; SQL ledger11, final Doner2/1, Golden7/7. Screenshots shop/results/final просмотрены,320px readable без overflow.
-- Следующее действие: дождаться sequential runner `party-prod` → network/traps/training-traps/benches, сравнить numeric regression с Stage6.2, финализировать REPORT/PROGRESS и собрать logs.
-
-## Checkpoint — сохранённые regressions
-
-- Party production21 PASS. Network browser5 профилей PASS: RTT40/80/150, jitter, stall-loss; push/moving support/head jump. Это headless Chromium, не замер FPS телефона.
-- PARTIAL: traps DEV сейчас выполняется; затем trapsprod, Training trapsprod,50+15 numeric benches.
-
-## Checkpoint — traps regression interrupted by failure
-
-- Trap DEV first run:40ms PASS,80ms FAIL finish timeout. B after reload jumped at spawn with direction0; test reconnect barrier could accept a pre-reload packet. No physics changes made.
-- Test now clears captured snapshots before reload and waits two animation frames after enabled controls before holding movement, so initial ready effects cannot clear that key. Full40/80/150 run being repeated. No PASS declared for failed attempt.
-- Runner stopped at `traps-dev`; resume `/private/tmp/doner-stage63-verify.py traps-dev`.
-
-## Checkpoint — traps DEV DONE
-
-- Полный повторный trap DEV run40/80/150 PASS (exit0). Ожидание нового snapshot/ready после reload исправлено только в QA helper. Никаких physics changes.
-- Текущий network browser: stable head height21px, push max frame step1.92px, support-jump max27.12px (motion+correction); известный snap не скрывается.
-- Следующее действие: traps production / Training traps production / benches; runner session43596. Затем final report/evidence/checks, shutdown только своих процессов.
+Следующее действие по Stage6.3: работа завершена, остановиться. Последующие production/manual задачи не маскируются как выполненные.

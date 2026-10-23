@@ -2,39 +2,10 @@ import Phaser from 'phaser';
 import { getTrap, trapOrientation, trapZone, segmentHit, SNOWY_CHAOS } from '@doner-game/shared';
 import type { Orientation, TrapId, TrapPlacement, TrapSnapshot } from '@doner-game/shared';
 
-// Original integer-pixel artwork. One renderer registry, replaceable through catalog visual IDs.
-type Painter = (g: Phaser.GameObjects.Graphics, x: number, y: number, facing: Orientation, frame: number) => void;
-const painters: Record<string, Painter> = {
-  'built-block': (g, x, y) => {
-    g.fillStyle(0x885c42).fillRect(x, y, 32, 16).fillStyle(0xc69567).fillRect(x + 1, y + 3, 30, 10);
-    g.fillStyle(0xeaf5ec).fillRect(x, y, 32, 3).fillStyle(0x815538).fillRect(x + 14, y + 4, 2, 10);
-  },
-  'trap-fan': (g, x, y, facing, frame) => {
-    g.fillStyle(0x34516d).fillRect(x, y, 32, 16).fillStyle(0x82bdca).fillRect(x + 2, y + 2, 28, 12);
-    g.fillStyle(0x1b354c).fillRect(x + 9, y + 2, 14, 12).fillStyle(0xd8f0ed);
-    if (Math.floor(frame / 6) % 2) g.fillRect(x + 12, y + 3, 3, 5).fillRect(x + 17, y + 8, 3, 5).fillRect(x + 10, y + 9, 5, 2).fillRect(x + 17, y + 4, 5, 2);
-    else g.fillRect(x + 15, y + 3, 3, 10).fillRect(x + 10, y + 7, 12, 3);
-    g.fillStyle(0xffc981).fillRect(x + 15, y + 7, 3, 3);
-    g.fillStyle(0xeaf5ec).fillRect(x, y, 8, 2).fillRect(x + 24, y, 8, 2);
-    arrow(g, x + (facing === 'left' ? 4 : facing === 'right' ? 27 : 16), y + 6, facing);
-  },
-  'trap-crossbow': (g, x, y, facing, frame) => {
-    const left = facing === 'left';
-    const box = (a: number, b: number, w: number, h: number, color: number) => g.fillStyle(color).fillRect(x + (left ? 32 - a - w : a), y + b, w, h);
-    box(2, 12, 28, 4, 0x60758b); box(8, 7, 16, 6, 0xa67d63); box(10, 1, 4, 14, 0xcda77d);
-    box(14, 2, 6, 3, 0xf1f5e9); box(14, 11, 6, 3, 0xf1f5e9); box(4, 6, 26, 3, 0x4a647b);
-    box(23, 6, 7, 3, Math.floor(frame) % 120 >= 96 ? 0xffc277 : 0x9edce6);
-    arrow(g, x + (left ? 3 : 29), y + 7, facing);
-  },
-};
-function arrow(g: Phaser.GameObjects.Graphics, x: number, y: number, facing: Orientation) {
-  g.fillStyle(0xffd18a);
-  if (facing === 'up') g.fillRect(x - 1, y - 5, 3, 6).fillRect(x - 3, y - 3, 7, 2);
-  else { const sign = facing === 'left' ? -1 : 1; g.fillRect(x - 2, y, 5, 2).fillRect(x + sign * 2, y - 2, 2, 6); }
-}
+import { trapPixels } from './winterArt';
+
 export function drawTrap(g: Phaser.GameObjects.Graphics, id: TrapId, x: number, y: number, direction?: Orientation, tick = 0) {
-  const trap = getTrap(id)!;
-  painters[trap.visual]!(g, Math.round(x), Math.round(y), trapOrientation(id, direction)!, tick);
+  for (const p of trapPixels(id, trapOrientation(id, direction)!, tick)) g.fillStyle(p.color).fillRect(Math.round(x) + p.x, Math.round(y) + p.y, p.w, p.h);
 }
 export class TrapRenderer {
   private g: Phaser.GameObjects.Graphics;
@@ -75,7 +46,9 @@ export class TrapRenderer {
       let fraction = 1;
       for (const solid of [...SNOWY_CHAOS.geometry, ...placements]) fraction = Math.min(fraction, segmentHit(shot, end, solid, shot.radius) ?? 1);
       const x = shot.x + (end.x - shot.x) * fraction;
-      this.g.fillStyle(0x375a77).fillRect(Math.round(x) - 4, shot.y - 2, 8, 4).fillStyle(0xecf7ef).fillRect(Math.round(x) - 3, shot.y - 1, 6, 2);
+      const px = Math.round(x), py = Math.round(shot.y), tail = shot.velocityX > 0 ? -1 : 1;
+      this.g.fillStyle(0x80bbce, .4).fillRect(px + tail * 5 - 2, py - 1, 4, 2);
+      this.g.fillStyle(0x375a77).fillRect(px - 4, py - 2, 8, 4).fillStyle(0xeaf4e8).fillRect(px - 3, py - 1, 6, 2).fillRect(px - 1, py - 2, 2, 4);
     }
     if (!this.reducedMotion) for (const hit of state.hits) if (tick - hit.tick < 12) {
       const d = Math.max(2, Math.floor(tick - hit.tick));

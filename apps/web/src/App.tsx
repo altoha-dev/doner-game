@@ -6,6 +6,7 @@ import { usePlayerAuth } from './usePlayerAuth';
 import { PlayerPanel } from './PlayerPanel';
 import { CharacterSelect } from './CharacterSelect';
 import { GameScreen } from './GameScreen';
+import { PixelIcon } from './PixelArt';
 import { WinterScene } from './WinterScene';
 import { PartyScreen } from './PartyScreen';
 
@@ -52,8 +53,8 @@ export function App() {
         {screen === 'home' && <nav className="menu" aria-label="Главное меню">
           <button className="pixel-button main-play" onClick={() => openParty('menu')}><span>ИГРАТЬ С ДРУЗЬЯМИ</span><small>СОБЕРИТЕ СВОЮ СНЕЖНУЮ БАНДУ →</small></button>
           <div className="room-actions"><button onClick={() => openParty('create')}>СОЗДАТЬ КОМНАТУ</button><button onClick={() => openParty('join')}>ВОЙТИ ПО КОДУ</button></div>
-          <button className="training-button" onClick={train}><span className="training-icon">⚑</span><span><b>ТРЕНИРОВКА</b><small>Поставь блок. Испытай трассу.</small></span><span>→</span></button>
-          <div className="menu-grid"><button onClick={() => setScreen('characters')}>ПЕРСОНАЖИ</button><button onClick={() => setScreen('profile')}>МОЙ ПРОФИЛЬ</button><button onClick={() => setScreen('how')}>КАК ИГРАТЬ</button><button onClick={() => setScreen('settings')}>НАСТРОЙКИ</button></div>
+          <button className="training-button" onClick={train}><span className="training-icon" aria-hidden="true"><PixelIcon name="flag" /></span><span><b>ТРЕНИРОВКА</b><small>Поставь блок. Испытай трассу.</small></span><span>→</span></button>
+          <div className="menu-grid"><button onClick={() => setScreen('characters')}><PixelIcon name="party" />ПЕРСОНАЖИ</button><button onClick={() => setScreen('profile')}><PixelIcon name="person" />МОЙ ПРОФИЛЬ</button><button onClick={() => setScreen('how')}><PixelIcon name="flag" />КАК ИГРАТЬ</button><button onClick={() => setScreen('settings')}><PixelIcon name="sparkle" />НАСТРОЙКИ</button></div>
           <p className="menu-note">Горячий донер. Холодный расчёт.</p>
         </nav>}
 
@@ -62,6 +63,6 @@ export function App() {
         {screen === 'how' && <section className="info-panel pixel-panel"><h2>ПОСТРОЙ → БЕГИ → ПОВТОРИ</h2><ol><li>Создай комнату и пригласи 1–3 друзей ссылкой или кодом. Выберите героев, нажмите ГОТОВ; host начнёт матч.</li><li>В BUILD выбери бесплатный блок, FAN за2 или CROSSBOW за3 Doner. После бесплатного блока можно купить EXTRA за1 либо завершить ход. Зелёный preview — можно ставить.</li><li>Когда все готовы или время вышло, начинается общий RACE. Беги к клетчатому финишу, прыгай через уступы.</li><li>После общих RESULTS host запускает следующий раунд. Все прежние блоки остаются.</li></ol><p>До 5 раундов. BUILD — 60 секунд, RACE — 90 секунд. Пауза останавливает только твоё управление.</p><p className="hint">За места1–4 получишь3/2/1/0 очков и0/1/2/3 Doner; DNF —0. Тренировка бесплатна, без наград; её карта сбрасывается при выходе в меню.</p><button className="pixel-button" onClick={train}>ПОПРОБОВАТЬ В ТРЕНИРОВКЕ</button></section>}
         {screen === 'settings' && <section className="info-panel pixel-panel"><h2>УЮТНЫЙ РЕЖИМ</h2><label className="setting"><input type="checkbox" checked={reducedMotion} disabled={systemMotion} onChange={e => setLessMotion(e.target.checked)} />Уменьшить анимацию</label><p className="hint">{systemMotion ? 'Включено настройкой вашего устройства.' : 'Убирает движение снега и мерцание огней.'}</p><p>Управление: стрелки / A, D и Space / W. На телефоне — кнопки под ареной.</p><p className="hint">В этом прототипе звука пока нет.</p></section>}
       </>}
-    </main><footer className="footer">v0.6.3 Doner Economy & Trap Shop</footer>
+    </main><footer className="footer">v0.6.3.5 Winter Pixel Art</footer>
   </div>;
 }

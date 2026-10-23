@@ -1,6 +1,6 @@
 {
   "name": "doner-game",
-  "version": "0.6.3",
+  "version": "0.6.3-5",
   "private": true,
   "packageManager": "pnpm@10.34.6",
   "engines": {

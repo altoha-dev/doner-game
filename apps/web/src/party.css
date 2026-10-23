@@ -40,3 +40,29 @@
 .build-party-status li { display: flex; justify-content: space-between; gap: 8px; }
 .build-party-status li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .build-party-status li strong { flex-shrink: 0; font-size: 8px; color: #c5d9e4; }
+
+.room-tabs button { font: 600 17px var(--font-display); }
+.room-tabs [aria-pressed=true], .room-characters [aria-pressed=true] { background: #3c5665; border-color: var(--accent); box-shadow: inset 0 2px #ffd99a, 0 3px #0b1c2c; }
+.room-code { border-top: 3px solid #dbe9e2; box-shadow: inset 0 -4px #142d40, 0 4px #0b1c2c; }
+.room-code strong { font: 700 clamp(36px, 10vw, 46px)/1 var(--font-display); text-shadow: 2px 2px #0b1c2c; }
+.room-code > span:first-child { color: #c2d7dc; }
+.invite-actions button { font: 600 13px var(--font-display); }
+.invite-actions button:last-child { font-size: 15px; }
+.lobby-player { border-left: 3px solid #7190a0; }
+.lobby-player.is-ready { border-left-color: var(--success); background: #284850; box-shadow: inset 0 2px #628a81, 0 4px #0b1c2c; }
+.lobby-player h2 { font: 600 22px/1.1 var(--font-display); overflow-wrap: anywhere; }
+.lobby-player h2 small { font: 600 12px var(--font-display); }
+.lobby-player p, .lobby-player b { font: 11px/1.5 var(--font-body); }
+.room-characters legend { font: 600 15px var(--font-display); }
+.room-characters button { font: 600 16px var(--font-display); padding: 12px 6px; box-shadow: inset 0 2px #638191, 0 3px #0b1c2c; }
+.room-field { font: 600 15px var(--font-display); }
+.room-field input, .room-field select { border-top-color: #a2bcc5; box-shadow: inset 0 3px #0d2236; }
+.connection-banner, .recovery-note { border-color: #a48b68; border-left: 4px solid var(--accent); background: #3b3e45; font: 12px/1.5 var(--font-body); }
+.build-party-status { border-color: #4e7085; border-top-color: #a7c4cc; box-shadow: inset 0 2px #38556a; background: #1b354b; padding: 12px; }
+.build-party-status > b { font: 600 16px var(--font-display); }
+.build-party-status li { padding: 5px 0; border-top: 1px solid #34536a; }
+.build-party-status li strong { font: 600 12px var(--font-display); }
+.finish-list li { border: 1px solid #5c7a8c; border-left: 3px solid #8eafb7; background: #203b50; box-shadow: inset 0 2px #355469, 0 3px #0b1c2c; }
+.finish-list li:first-child { border-left-color: var(--accent); background: #33464e; }
+.finish-list li b { font: 600 18px var(--font-display); overflow-wrap: anywhere; }
+.finish-list li span { white-space: normal; }

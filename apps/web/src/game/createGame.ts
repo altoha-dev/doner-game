@@ -78,7 +78,7 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
       this.physics.add.collider(this.player, this.solids);
       this.cameras.main.setBounds(0, 0, arena.width, arena.height).setDeadzone(32, 32);
       this.grid = this.add.graphics().setDepth(3);
-      this.grid.lineStyle(1, 0x9dd9e5, .18);
+      this.grid.lineStyle(1, 0xb3d6dc, .12);
       for (let x = 0; x < arena.width; x += arena.grid) this.grid.lineBetween(x, 176, x, 272);
       for (let y = 176; y <= 272; y += arena.grid) this.grid.lineBetween(0, y, arena.width, y);
       for (const a of arena.protectedAreas) this.grid.fillStyle(0xf68b83, .09).fillRect(a.x, 176, a.width, 96);
@@ -183,7 +183,7 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
         item.value = value;
         const ownerColor = PLAYER_COLORS[value.seat] ?? PLAYER_COLORS[0];
         item.graphic.clear(); drawTrap(item.graphic, value.objectType, 0, 0, value.orientation);
-        item.graphic.setAlpha(.6).fillStyle(Number.parseInt(ownerColor.slice(1), 16), .28).fillRect(0, 0, 32, 16)
+        item.graphic.setAlpha(.75).fillStyle(Number.parseInt(ownerColor.slice(1), 16), .16).fillRect(0, 0, 32, 16)
           .lineStyle(1, Number.parseInt((value.valid ? ownerColor : '#ff8a83').slice(1), 16)).strokeRect(0, 0, 32, 16);
         item.label.setText(`${value.valid ? '✓' : '×'} ${value.displayName} · ${getTrap(value.objectType)!.displayName}${value.orientation === 'left' ? ' ←' : value.orientation === 'right' ? ' →' : value.orientation === 'up' ? ' ↑' : ''}`).setColor(value.valid ? ownerColor : '#ff8a83');
       }
@@ -222,9 +222,9 @@ export function createGame({ host, arena, characterId, snapshot: initialSnapshot
         const seat = network?.getRoom()?.players.find(p => p.playerId === network.localId)?.seat ?? 0;
         const color = valid ? network ? Number.parseInt(PLAYER_COLORS[seat]!.slice(1), 16) : 0x9af1bf : 0xff8a83;
         drawTrap(this.ghost, previewTrap, preview.x, preview.y, previewOrientation);
-        this.ghost.setAlpha(.6).fillStyle(color, .35).fillRect(preview.x, preview.y, 32, 16);
+        this.ghost.setAlpha(.8).fillStyle(color, .18).fillRect(preview.x, preview.y, 32, 16);
         this.ghost.lineStyle(1, color, 1).strokeRect(preview.x, preview.y, 32, 16);
-        this.ghost.fillStyle(color).fillRect(preview.x + 14, preview.y + 6, 4, 4);
+        this.ghost.fillStyle(color).fillRect(preview.x, preview.y, 4, 2).fillRect(preview.x + 28, preview.y + 14, 4, 2);
       }
     }
     resize() { this.cameras.main.setSize(this.scale.width, this.scale.height); this.buildView(); }

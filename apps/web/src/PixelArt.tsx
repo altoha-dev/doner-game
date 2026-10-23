@@ -1,4 +1,5 @@
-import type { CharacterId } from '@doner-game/shared';
+import { trapPixels } from './game/winterArt';
+import type { TrapId, CharacterId } from '@doner-game/shared';
 
 const icons = {
   back: 'M7 3h3v3H7v1h7v3H7v1h3v3H7v-2H5v-2H3V7h2V5h2z',
@@ -41,4 +42,8 @@ export function CharacterPortrait({ characterId, className = '' }: { characterId
     <path fill="#1a201a" d="M7 29h2v3H7zm18 0h2v3h-2z" />
     {characterId === 'ayazhan' && <><path fill={colors.coat} d="M9 5h14v5H9zM12 3h8v2h-8z" /><path fill={colors.light} d="M9 8h14v2H9zM14 1h4v3h-4z" /></>}
   </svg>;
+}
+
+export function TrapIcon({ id }: { id: TrapId }) {
+  return <svg className="trap-art" viewBox="0 0 32 16" aria-hidden="true" shapeRendering="crispEdges">{trapPixels(id,id==='fan'?'up':id==='arcade-crossbow'?'right':'none').map((p,i)=><rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} fill={`#${p.color.toString(16).padStart(6,'0')}`} />)}</svg>;
 }

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { trapPixels } from './winterArt';
 import { CHARACTER_COLORS } from './playerVisual';
 import type { CharacterId } from '@doner-game/shared';
 
@@ -9,31 +10,35 @@ export function createWinterTextures(scene: Phaser.Scene, id: CharacterId, inclu
     const g = scene.make.graphics({ x: 0, y: 0 }); paint(g); g.generateTexture(key, w, h); g.destroy();
   };
   draw('snow-rock', 16, 16, g => {
-    g.fillStyle(0x445c77).fillRect(0, 0, 16, 16); g.fillStyle(0x63829a).fillRect(1, 5, 8, 5).fillRect(10, 11, 5, 3);
-    g.fillStyle(0xb8d8e7).fillRect(0, 2, 16, 3); g.fillStyle(0xf1f5e9).fillRect(0, 0, 16, 3).fillRect(2, 3, 3, 2);
-    g.fillStyle(0x31495f).fillRect(0, 14, 16, 2).fillRect(9, 7, 3, 2);
+    g.fillStyle(0x30475d).fillRect(0,0,16,16); g.fillStyle(0x48677b).fillRect(1,5,9,5).fillRect(5,11,10,4);
+    g.fillStyle(0x638197).fillRect(1,5,8,1).fillRect(5,11,9,1); g.fillStyle(0x243b51).fillRect(11,7,5,2).fillRect(0,14,4,2);
+    g.fillStyle(0x8fb8c9).fillRect(0,2,16,3); g.fillStyle(0xeaf4e8).fillRect(0,0,16,2).fillRect(2,2,4,2).fillRect(12,2,2,1);
+    g.fillStyle(0xb4d9e1).fillRect(3,4,1,3).fillRect(14,4,1,2);
   });
-  draw('rock', 16, 16, g => { g.fillStyle(0x344b65).fillRect(0, 0, 16, 16); g.fillStyle(0x435e76).fillRect(2, 2, 10, 6).fillRect(7, 11, 9, 4); });
-  draw('ice', 16, 16, g => {
-    g.fillStyle(0x589db6).fillRect(0, 0, 16, 16); g.fillStyle(0xc9eef0).fillRect(0, 0, 16, 3);
-    g.fillStyle(0x9ad6df).fillRect(3, 4, 3, 7).fillRect(6, 3, 3, 4); g.fillStyle(0x366e92).fillRect(0, 14, 16, 2);
+  draw('rock',16,16,g=>{ g.fillStyle(0x2a4056).fillRect(0,0,16,16); g.fillStyle(0x3a566b).fillRect(1,1,10,6).fillRect(5,9,10,6); g.fillStyle(0x48677b).fillRect(2,1,8,1).fillRect(6,9,8,1); g.fillStyle(0x20364a).fillRect(12,1,1,7).fillRect(3,9,1,7); });
+  draw('ice',16,16,g=>{
+    g.fillStyle(0x396a86).fillRect(0,0,16,16); g.fillStyle(0x69a5bb).fillRect(1,3,14,11);
+    g.fillStyle(0x96d0db).fillRect(2,4,3,7).fillRect(5,3,2,4).fillRect(11,8,2,5);
+    g.fillStyle(0xc2e7e7).fillRect(3,4,1,5).fillRect(12,9,1,3); g.fillStyle(0xeaf4e8).fillRect(0,0,16,2).fillRect(9,2,5,1);
+    g.fillStyle(0x274f6b).fillRect(0,14,16,2); g.fillStyle(0x90c3d3).fillRect(6,13,3,1);
   });
-  draw('built-block', 32, 16, g => {
-    g.fillStyle(0x885c42).fillRect(0, 0, 32, 16); g.fillStyle(0xc69567).fillRect(1, 3, 30, 10);
-    g.fillStyle(0x815538).fillRect(14, 4, 2, 10).fillRect(0, 13, 32, 3);
-    g.fillStyle(0xeaf5ec).fillRect(0, 0, 32, 3); g.fillStyle(0xffc780).fillRect(3, 5, 3, 3).fillRect(25, 5, 3, 3);
-  });
+  draw('built-block',32,16,g=>{ for(const p of trapPixels('basic-platform')) g.fillStyle(p.color).fillRect(p.x,p.y,p.w,p.h); });
   draw('pine', 32, 56, g => {
-    g.fillStyle(0x735a50).fillRect(14, 42, 5, 14);
+    g.fillStyle(0x574e50).fillRect(14, 42, 5, 14); g.fillStyle(0x7c6b5f).fillRect(15, 43, 1, 12);
     for (let i = 0; i < 3; i++) {
       const x = 10 - i * 4, y = 4 + i * 12, w = 12 + i * 8;
-      g.fillStyle(0x2a6270).fillRect(x, y + 4, w, 12); g.fillStyle(0xbcd9dd).fillRect(x, y + 4, w, 3).fillRect(x + 4, y, w - 8, 4);
+      g.fillStyle(0x284c5b).fillRect(x, y + 4, w, 12); g.fillStyle(0x426c76).fillRect(x + 2, y + 7, w - 5, 3);
+      g.fillStyle(0x7fabb5).fillRect(x, y + 4, w, 4); g.fillStyle(0xc5dcdb).fillRect(x, y + 4, w, 2).fillRect(x + 4, y, w - 8, 4);
+      g.fillStyle(0x9fc5ce).fillRect(x + 3, y + 8, 2, 2).fillRect(x + w - 4, y + 7, 1, 3);
     }
   });
   draw('lamp', 16, 48, g => {
     g.fillStyle(0x273c56).fillRect(7, 12, 3, 36).fillRect(3, 46, 11, 2);
+    g.fillStyle(0x6a8794).fillRect(7, 19, 1, 27);
     g.fillStyle(0x4d647b).fillRect(2, 4, 13, 15); g.fillStyle(0xffc571).fillRect(4, 6, 9, 10);
     g.fillStyle(0xffe7ac).fillRect(5, 7, 3, 6); g.fillStyle(0xe3f1ed).fillRect(0, 2, 16, 3);
+    g.fillStyle(0x293f52).fillRect(8, 5, 1, 12).fillRect(3, 16, 11, 2);
+    g.fillStyle(0xb1cfd5).fillRect(3, 45, 11, 1);
   });
   draw('snowman', 24, 32, g => {
     g.fillStyle(0xd5e9ec).fillRect(3, 16, 18, 14).fillRect(6, 6, 12, 12);

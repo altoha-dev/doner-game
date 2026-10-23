@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 const base = process.env.BROWSER_TEST_URL ?? 'http://127.0.0.1:5186', production = process.env.BROWSER_TEST_PRODUCTION === '1';
-const shots = `../../artifacts/stage-6.2/training-traps-${production ? 'production' : 'development'}`;
+const shots = process.env.BROWSER_SCREENSHOT_DIR ?? `../../artifacts/stage-6.2/training-traps-${production ? 'production' : 'development'}`;
 await mkdir(shots, { recursive: true });
 const browser = await chromium.launch(), page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const errors = [], requests = []; page.on('pageerror', e => errors.push(e.message)); page.on('request', r => requests.push(r.url()));

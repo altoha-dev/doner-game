@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { DONER_RULES, buildOffer, matchLeaders, buildPlayerStatus, getCharacter, getTrap, TRAPS, ONLINE_RULES, PARTY_RULES, placementError, PLAYER_COLORS, snapToGrid } from '@doner-game/shared';
 import type { ArenaSession, BuildPreview, CharacterId, OnlineRoom, Point, TrapId, Orientation } from '@doner-game/shared';
-import { CharacterPortrait } from './PixelArt';
+import { CharacterPortrait, TrapIcon } from './PixelArt';
 import type { GameRuntime } from './game/createGame';
 import { GameInput, KEY_ACTIONS } from './game/input';
 import type { GameAction } from './game/input';
@@ -122,7 +122,7 @@ export function GameScreen({ characterId, onBack, onNewMatch, reducedMotion, ext
         const unavailable = !option || (online && (balance === undefined || balance < option.cost));
         const label = option?.slot === 2 ? 'EXTRA BLOCK' : trap.id === 'basic-platform' ? 'ПЛАТФОРМА' : trap.id === 'arcade-crossbow' ? 'CROSSBOW' : 'FAN';
         return <button key={trap.id} className="block-picker button-secondary" aria-label={`${label} ${price ? `${price} DONER` : trap.id === 'basic-platform' ? '1 БЕСПЛАТНО' : 'БЕСПЛАТНО'}`} aria-pressed={Boolean(preview && trapId === trap.id)} disabled={unavailable || offline || waiting || status !== 'ready'} onClick={() => { setTrapId(trap.id); setOrientation(trap.orientations[0]!); setPreview({ x: 176, y: 240 }); setCamera(192); }}>
-          <span aria-hidden="true" className={`trap-swatch trap-swatch--${trap.category}`}>{trap.category === 'platform' ? '▰' : trap.category === 'air' ? '✣' : '➤'}</span>{label}<small>{option ? option.cost ? `${option.cost} DONER` : 'БЕСПЛАТНО' : 'НЕТ СЛОТА'}</small><small>{unavailable && option ? 'НЕ ХВАТАЕТ DONER' : trap.category === 'platform' ? 'Твёрдая опора' : trap.category === 'air' ? 'Воздушный поток' : 'Снежный болт'}</small>
+          <TrapIcon id={trap.id} />{label}<small>{option ? option.cost ? `${option.cost} DONER` : 'БЕСПЛАТНО' : 'НЕТ СЛОТА'}</small><small>{unavailable && option ? 'НЕ ХВАТАЕТ DONER' : trap.category === 'platform' ? 'Твёрдая опора' : trap.category === 'air' ? 'Воздушный поток' : 'Снежный болт'}</small>
         </button>;
       })}</div>}
       {online && !placedThisRound && <p className="game-hint">{ownPlacements.length ? 'Бесплатный блок готов. Можно купить EXTRA BLOCK или завершить ход.' : `Бесплатный BLOCK или платная ловушка. EXTRA BLOCK — ${DONER_RULES.extraBlock} Doner после бесплатного. Оплата только после установки.`}</p>}
